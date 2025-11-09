@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="ERROR">
+
+    <!-- ============================
+       APPENDER: Console
+       ============================ -->
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss} [%t] %-5level %logger{36} - %msg%n" />
+        </Console>
+
+        <!-- ============================
+         APPENDER: Rolling File
+         ============================ -->
+        <RollingFile name="FileLogger"
+            fileName="logs/application.log"
+            filePattern="logs/application-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout>
+                <pattern>%d{yyyy-MM-dd HH:mm:ss} [%t] %-5level %logger{36} - %msg%n</pattern>
+            </PatternLayout>
+            <Policies>
+                <!-- Rollover giornaliero -->
+                <TimeBasedTriggeringPolicy />
+                <!-- oppure: per dimensione -->
+                <SizeBasedTriggeringPolicy size="10MB" />
+            </Policies>
+            <DefaultRolloverStrategy max="5" />
+        </RollingFile>
+    </Appenders>
+
+    <!-- ============================
+       ROOT LOGGER
+       ============================ -->
+    <Loggers>
+        <!-- Livello generale -->
+        <Root level="debug">
+            <AppenderRef ref="Console" />
+            <AppenderRef ref="FileLogger" />
+        </Root>
+
+        <!-- Silenzia JmDNS -->
+        <Logger name="javax.jmdns" level="warn" additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
+
+        <!-- eventualmente silenzia anche le librerie di rete -->
+        <Logger name="org.apache.http" level="warn" additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
+
+        <Logger name="io.grpc.netty" level="error" additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
+    </Loggers>
+
+</Configuration>

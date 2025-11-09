@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "it.jmr.grpc";
+option java_outer_classname = "MapReduceProto";
+
+package mapreduce;
+
+// Servizio principale MapReduce
+service MapReduceService {
+  // Sottomette un job al master
+  rpc SubmitJob(SubmitJobRequest) returns (SubmitJobResponse);
+  
+  // Ottiene lo stato di un job
+  rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
+  
+  // Lista tutti i job
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  
+  // Cancella un job
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+  
+}
+
+// Richiesta per sottomettere un job
+message SubmitJobRequest {
+  string jar_id = 1;           // ID del JAR precedentemente caricato
+  string main_class = 2;       // Classe principale da eseguire
+}
+
+// Risposta alla sottomissione del job
+message SubmitJobResponse {
+  bool success = 1;
+  string job_id = 2;           // ID univoco del job
+  string message = 3;          // Messaggio di conferma o errore
+}
+
+// Richiesta stato job
+message GetJobStatusRequest {
+  string job_id = 1;
+}
+
+// Risposta stato job
+message GetJobStatusResponse {
+  bool found = 1;
+  JobInfo job_info = 2;
+}
+
+// Richiesta lista job
+message ListJobsRequest {
+  // Vuoto per ora, potrebbe contenere filtri in futuro
+}
+
+// Risposta lista job
+message ListJobsResponse {
+  repeated JobInfo jobs = 1;
+  int32 total_count = 2;
+}
+
+// Richiesta cancellazione job
+message CancelJobRequest {
+  string job_id = 1;
+}
+
+// Risposta cancellazione job
+message CancelJobResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Informazioni sul job
+message JobInfo {
+  string job_id = 1;
+  string main_class = 2;
+  JobStatus status = 3;
+  int64 submission_time = 4;
+  int64 start_time = 5;
+  int64 end_time = 6;
+  string error_message = 7;
+}
+
+// Stato del job
+enum JobStatus {
+  PENDING = 0;
+  RUNNING = 1;
+  COMPLETED = 2;
+  FAILED = 3;
+  CANCELLED = 4;
+}

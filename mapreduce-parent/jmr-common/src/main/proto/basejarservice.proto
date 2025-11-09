@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "it.jmr.grpc";
+option java_outer_classname = "JarProto";
+
+package mapreduce;
+
+// Servizio gestione jar
+service JarService {
+  // Trasferisce il JAR al master tramite streaming
+  rpc UploadJar(stream JarChunk) returns (UploadJarResponse);  
+}
+
+
+// Chunk di dati del JAR per lo streaming
+message JarChunk {
+  bytes content = 1;           // Contenuto del chunk
+  string jar_name = 2;         // Nome del file JAR
+  int64 total_size = 3;        // Dimensione totale (solo nel primo chunk)
+}
+
+// Risposta al caricamento del JAR
+message UploadJarResponse {
+  bool success = 1;
+  string jar_id = 2;           // ID univoco del JAR caricato
+  string message = 3;
+}

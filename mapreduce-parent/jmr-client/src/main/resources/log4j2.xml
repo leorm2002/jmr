@@ -1,0 +1,18 @@
+<Configuration status="DEBUG">
+    <Appenders>
+        <Console name="ConsoleSync" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n" />
+        </Console>
+
+        <!-- Appender asincrono -->
+        <Async name="Console">
+            <AppenderRef ref="ConsoleSync" />
+        </Async>
+    </Appenders>
+
+    <Loggers>
+        <Root level="info">
+            <AppenderRef ref="Console" />
+        </Root>
+    </Loggers>
+</Configuration>

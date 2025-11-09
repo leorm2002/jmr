@@ -1,0 +1,590 @@
+\documentclass{scrartcl}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{natbib}
+\usepackage{graphicx}
+\usepackage{cleveref} % this must be the last package to be loaded
+
+\newcommand{\emailaddr}[1]{\href{mailto:#1}{\texttt{#1}}}
+
+\title{\LARGE
+    Final Report Template\\
+    (replace with your project name)
+}
+\subtitle{Final Report for the Distributed Systems Course [Your academic year here]}
+
+% Consider watching:
+% https://www.youtube.com/watch?v=ihxSUsJB_14
+% https://www.youtube.com/watch?v=XTFWaV55uDo
+
+\author{
+    Author 1 \\ \emailaddr{author1@email.it}
+    \and
+    Author 2 \\ \emailaddr{author2@gmail.com}
+    \and
+    Author 3 \\ \emailaddr{author3@unibo.it}
+}
+
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+  Up to $\sim$2000 characters briefly describing the project.
+\end{abstract}
+
+
+\section*{Quick \LaTeX{} suggestions}
+
+If you need to cite a reference, you can use the \texttt{cite} command,
+like providing the BibTex key of some entry in the \texttt{references.bib} file,
+e.g.: \cite{adams1995hitchhiker}.
+
+You can find pre-coocked BibTex entries for most Computer Science papers on \href{https://dblp.uni-trier.de/}{DBLP}.
+
+If you need to include an image,
+let \LaTeX{} decide where to put it by using the \texttt{figure} environment,
+with a \texttt{includegraphics} command inside it.
+%
+If your need to reference a figure,
+use the \texttt{label} command to assign a label to the figure,
+and then use the \texttt{cref} command to reference it.
+%
+Put figures in the \texttt{figures} folder.
+%
+A complete example is shown in \cref{fig:universe}.
+
+\begin{figure}
+  \centering
+  \includegraphics[width=0.5\textwidth]{figures/universe.jpg}
+  \caption{This is an example image}
+  \label{fig:universe}
+\end{figure}
+
+Do \textbf{not} put any placement constraint on figures,
+such as \texttt{[h]} or \texttt{[h!]}.
+%
+Same considerations apply for other floating elements
+(e.g. tables, algorithms, listings, etc.).
+
+Do \textbf{not} use the \texttt{\textbackslash\textbackslash} or \texttt{\textbackslash newline} commands to break lines.
+
+Just leave an empty line between two paragraphs to start a new one.
+%
+The new line will be automatically indented.
+%
+This is intended: it is the \LaTeX{} way to separate capoverses.
+
+```latex
+
+\section{Concept}\label{concept}
+
+The project consists of developing a \textbf{software library} for distributed computing based on the MapReduce paradigm. The library is intended for developers who need to process large amounts of data in parallel and distributed fashion, providing a high-level abstraction that hides the complexity of distributed programming.
+
+\subsection{Type of product}
+
+The library is configured as a software framework that can be integrated into existing applications or used to build new data processing solutions. Developers can incorporate the library into their projects through dependency management systems and use its APIs to define distributed processing jobs.
+
+\subsection{Use case description}
+
+The library enables large-scale data processing operations following the MapReduce pattern. Users (developers) define two main functions:
+%
+\begin{itemize}
+  \item \textbf{Map}: transforms each element of the input dataset into one or more intermediate key-value pairs
+  \item \textbf{Reduce}: aggregates all values associated with the same key, producing the final result
+\end{itemize}
+%
+The library automatically handles data distribution across compute nodes, execution parallelization, failure management, and result aggregation.
+
+The library will be agnostic to user location, as it is distributed as a software package. The compute cluster on which jobs are executed can be on-premise (corporate datacenter) or in the cloud (AWS, Azure, GCP), depending on organizational needs.
+
+\paragraph{Interactions with the system: when and how frequently?}
+Interaction occurs primarily at two stages:
+%
+\begin{itemize}
+  \item \textbf{Development phase}: developers write code using the library, defining map and reduce functions and configuring job parameters
+  \item \textbf{Execution phase}: once a job is defined, it can be executed multiple on demand, depending on data processing needs. Jobs can be scheduled periodically or triggered by specific events (e.g., new data arrival), all this kind of scheduling is managed externally by the user.
+\end{itemize}
+
+Interaction occurs through \textbf{programmatic APIs} that developers invoke from their code. The library will be used to execute specific data processing jobs.
+
+\paragraph{Management of data}
+The library will need to manage several types of data:
+%
+\begin{itemize}
+  \item \textbf{Input/output data}: the library will read and write data on shared storage systems. The library will be agnostic regarding storage systems, will also come with integrated data distribution mechanisms, but will support extensions writtern by users.
+  \item \textbf{Intermediate data}: during execution, partial results from the Map phase are temporarily stored in memory on worker nodes, to be subsequently processed by the Reduce phase, the transfer of this data between nodes is managed by the library
+\end{itemize}
+
+\subsection{Why is distribution needed?}
+
+Distribution is fundamental for this type of library for multiple complementary reasons:
+
+\paragraph{Computational speedup}
+The primary driver is processing acceleration through parallelism. Computation intesive tasks would require days or weeks to process on a single machine. By distributing the load across nodes, processing time is drastically reduced. The MapReduce paradigm is inherently parallelizable: different portions of the dataset can be processed simultaneously by independent workers, and intermediate results can be aggregated in parallel for different keys.
+
+\paragraph{Massive data volume management}
+Many organizations must process datasets that exceed the memory and storage capacity of a single node. Distribution allows data to be partitioned across multiple machines, overcoming the hardware limitations of a centralized system.
+
+\paragraph{Horizontal scalability}
+The library must support data volume growth without requiring expensive vertical hardware upgrades. By adding new nodes to the cluster, computational capacity increases linearly (ideally), allowing dynamic adaptation to requirements.
+
+\paragraph{Resource sharing}
+Distribution enables efficient resource sharing among multiple users and applications. Tasks may be scheduled to run concurrently on the same cluster, optimizing resource utilization and reducing costs.
+
+\section{Requirements Elicitation and Analysis}\label{requirements}
+
+\subsection{Functional requirements}
+\subsection{Non functional requirements}
+\subsection{Implementation requirements}
+
+\begin{itemize}
+  \item The requirements must explain \textbf{what} (not how) the software
+        being produced should do.
+        %
+        \begin{itemize}
+          \item you should not focus on the particular problems, but exclusively on
+                what you want the application to do.
+        \end{itemize}
+
+  \item Requirements must be clearly identified, and possibly numbered
+
+  \item Requirements are divided into:
+        %
+        \begin{itemize}
+          \item \textbf{Functional}: some functionality the software should provide to the user
+
+          \item \textbf{Non-functional}: requirements that do not directly concern behavioural aspects, such as consistency, availability, etc.
+
+          \item \textbf{Implementation}: constrain the entire phase of system realization,
+                for instance by requiring the use of a specific programming language and/or a specific software tool
+                %
+                \begin{itemize}
+                  \item these constraints should be adequately justified by political / economic / administrative reasons\ldots{}
+                  \item \ldots{} otherwise, implementation choices should emerge \emph{as  a consequence of} design
+                \end{itemize}
+        \end{itemize}
+
+  \item If there are domain-specific terms, these should be explained in a glossary
+
+  \item Each requirement must have its own \textbf{acceptance criterion}
+        %
+        \begin{itemize}
+          \item these will be important for the validation phase
+        \end{itemize}
+\end{itemize}
+
+\subsection{Relevant Distributed System Features}
+\label{ds-features}
+
+Motivate which distributed system features are relevant for your project, and which are not.
+%
+\begin{itemize}
+  \item transparency
+        \begin{itemize}
+          \item does your system need to hide distribution details from users or developers?
+          \item is it important that failures, location, or replication are invisible?
+        \end{itemize}
+
+  \item fault tolerance, dependability -- availability, reliability, integrity, maintainability, safety
+        \begin{itemize}
+          \item what happens if a component fails? is uninterrupted service required?
+          \item is data loss or corruption unacceptable?
+          \item how quickly must the system recover from faults?
+        \end{itemize}
+
+  \item performance, concurrency, computation / communication efficiency, bandwidth
+        \begin{itemize}
+          \item Are there strict requirements on response time or throughput?
+          \item Will many operations happen in parallel?
+          \item Is network usage a concern?
+        \end{itemize}
+
+  \item economy, costs
+        \begin{itemize}
+          \item Are there budget constraints for development, deployment, or operation?
+          \item Is minimizing resource usage important?
+        \end{itemize}
+\end{itemize}
+
+\section{Design}\label{design}
+
+This chapter explains the strategies used to meet the requirements identified in the analysis.
+%
+Ideally, the design should be the same, regardless of the technological choices made during the implementation phase.
+
+\begin{quote}
+  You can re-arrange the sections as you prefer, but all the sections must be present in the end
+\end{quote}
+
+\noindent
+\textbf{Important:} try to motivate your design choices in relation to the requirements and features identified
+in \cref{requirements} and \cref{ds-features}.
+
+\subsection{Architecture}\label{architecture}
+The overall \textbf{architectural style} at a very high level of the system is describe by the following figure.
+
+\begin{figure}
+  \centering
+  \includegraphics[width=0.5\textwidth]{diagrams/diagramma_architetturale.png}
+  \caption{Architectural diagram}
+  \label{fig:architectural-diagram}
+\end{figure}
+
+It is composed of the following main \textbf{components}:
+%
+\begin{itemize}
+  \item \textbf{Client}: the user-facing application that submits MapReduce jobs to the master node
+  \item \textbf{Master node}: responsible for job scheduling, task assignment to worker nodes, and result aggregation
+  \item \textbf{Worker nodes}: execute map and reduce tasks assigned by the master node
+  \item \textbf{Network file system}: shared storage system used to read input data and write output results
+\end{itemize}
+%
+
+\begin{itemize}
+  \item Which architectural style?
+        %
+        \begin{itemize}
+          \item why?
+        \end{itemize}
+\end{itemize}
+
+\subsection{Infrastructure}\label{infrastructure}
+
+\begin{itemize}
+  \item are there \emph{infrastructural components} that need to be introduced? \emph{how many}?
+        %
+        \begin{itemize}
+          \item e.g.~\emph{clients}, \emph{servers}, \emph{load balancers},
+                \emph{caches}, \emph{databases}, \emph{message brokers},
+                \emph{queues}, \emph{workers}, \emph{proxies}, \emph{firewalls},
+                \emph{CDNs}, \emph{etc.}
+        \end{itemize}
+
+  \item how do components \emph{distribute} over the network? \emph{where}?
+        %
+        \begin{itemize}
+          \item e.g.~do servers / brokers / databases / etc. sit on the same
+                machine? on the same network? on the same datacenter? on the same
+                continent?
+        \end{itemize}
+
+  \item how do components \emph{find} each other?
+        %
+        \begin{itemize}
+          \item how to \emph{name} components?
+          \item e.g.~DNS, \emph{service discovery}, \emph{load balancing},
+                \emph{etc.}
+        \end{itemize}
+\end{itemize}
+
+
+\subsection{Modelling}\label{modelling}
+
+\begin{itemize}
+  \item which \textbf{domain entities} are there?
+        %
+        \begin{itemize}
+          \item e.g.~\emph{users}, \emph{products}, \emph{orders}, \emph{etc.}
+        \end{itemize}
+
+  \item how do \emph{domain entities} \textbf{map to} \emph{infrastructural components}?
+        %
+        \begin{itemize}
+          \item e.g.~state of a video game on central server, while inputs/representations on clients
+          \item e.g.~where to store messages in an IM app? for how long?
+        \end{itemize}
+
+  \item which \textbf{domain events} are there?
+        %
+        \begin{itemize}
+          \item e.g.~\emph{user registered}, \emph{product added to cart}, \emph{order placed}, \emph{etc.}
+        \end{itemize}
+
+  \item which sorts of \textbf{messages} are exchanged?
+        %
+        \begin{itemize}
+          \item e.g.~\emph{commands}, \emph{events}, \emph{queries}, \emph{etc.}
+        \end{itemize}
+
+  \item what information does the \textbf{state} of the system comprehend
+        %
+        \begin{itemize}
+          \item e.g.~\emph{users' data}, \emph{products' data}, \emph{orders' data}, \emph{etc.}
+        \end{itemize}
+\end{itemize}
+
+\begin{quote}
+  Class diagram are welcome here
+\end{quote}
+
+\subsection{Interaction}\label{interaction}
+  
+\begin{itemize}
+  \item how do components \emph{communicate}? \emph{when}? \emph{what}?
+  \item \emph{which} \textbf{interaction patterns} do they enact?
+\end{itemize}
+
+\begin{quote}
+  Sequence diagrams are welcome here
+\end{quote}
+
+\subsection{Behaviour}\label{behaviour}
+
+\begin{itemize}
+  \item how does \emph{each} component \textbf{behave} individually (e.g.~in \emph{response} to \emph{events} or messages)?
+        \begin{itemize}
+          \item some components may be \emph{stateful}, others \emph{stateless}
+        \end{itemize}
+
+  \item which components are in charge of updating the \textbf{state} of the system? \emph{when}? \emph{how}?
+\end{itemize}
+
+\begin{quote}
+  State diagrams are welcome here
+\end{quote}
+
+\subsection{Data and Consistency Issues}\label{data-and-consistency-issues}
+
+\begin{itemize}
+  \item Is there any data that needs to be stored?
+        %
+        \begin{itemize}
+          \item \emph{what} data? \emph{where}? \emph{why}?
+        \end{itemize}
+
+  \item how should \emph{persistent data} be \textbf{stored}?
+        %
+        \begin{itemize}
+          \item e.g.~relations, documents, key-value, graph, etc.
+          \item why?
+        \end{itemize}
+
+  \item Which components perform queries on the database?
+        %
+        \begin{itemize}
+          \item \emph{when}? \emph{which} queries? \emph{why}?
+          \item concurrent read? concurrent write? why?
+        \end{itemize}
+
+  \item Is there any data that needs to be shared between components?
+        %
+        \begin{itemize}
+          \item \emph{why}? \emph{what} data?
+        \end{itemize}
+\end{itemize}
+
+\subsection{Fault-Tolerance}\label{fault-tolerance}
+
+\begin{itemize}
+  \item Is there any form of data \textbf{replication} / federation / sharing?
+        %
+        \begin{itemize}
+          \item \emph{why}? \emph{how} does it work?
+        \end{itemize}
+
+  \item Is there any \textbf{heart-beating}, \textbf{timeout}, \textbf{retry mechanism}?
+        %
+        \begin{itemize}
+          \item \emph{why}? \emph{among} which components? \emph{how} does it work?
+        \end{itemize}
+
+  \item Is there any form of \textbf{error handling}?
+        %
+        \begin{itemize}
+          \item \emph{what} happens when a component fails? \emph{why}? \emph{how}?
+        \end{itemize}
+\end{itemize}
+
+\subsection{Availability}\label{availability}
+
+\begin{itemize}
+  \item Is there any \textbf{caching} mechanism?
+        %
+        \begin{itemize}
+          \item \emph{where}? \emph{why}?
+        \end{itemize}
+
+  \item Is there any form of \textbf{load balancing}?
+        %
+        \begin{itemize}
+          \item \emph{where}? \emph{why}?
+        \end{itemize}
+
+  \item In case of \textbf{network partitioning}, how does the system behave?
+        %
+        \begin{itemize}
+          \item \emph{why}? \emph{how}?
+        \end{itemize}
+\end{itemize}
+
+\subsection{Security}\label{security}
+
+\begin{itemize}
+  \item Is there any form of \textbf{authentication}?
+        %
+        \begin{itemize}
+          \item \emph{where}? \emph{why}?
+        \end{itemize}
+
+  \item Is there any form of \textbf{authorization}?
+        %
+        \begin{itemize}
+          \item which sort of \emph{access control}?
+          \item which sorts of users / \emph{roles}? which \emph{access rights}?
+        \end{itemize}
+
+  \item Are \textbf{cryptographic schemas} being used?
+        %
+        \begin{itemize}
+          \item e.g.~token verification,
+          \item e.g.~data encryption, etc.
+        \end{itemize}
+\end{itemize}
+
+\section{Implementation}\label{implementation}
+
+Please report here all the implementation (technology-dependent) choices you made while implementing your design.
+
+\begin{quote}
+  If you run out of time for this project, you may consider leaving some aspect unimplemented,
+  and simply discuss how you would have implemented them.
+  %
+  In this case, better would be to discuss unimplemented features in \cref{future-works}.
+\end{quote}
+
+\begin{itemize}
+  \item which \textbf{network protocols} to use?
+        %
+        \begin{itemize}
+          \item e.g.~UDP, TCP, HTTP, WebSockets, gRPC, XMPP, AMQP, MQTT, etc.
+        \end{itemize}
+
+  \item how should \emph{in-transit data} be \textbf{represented}?
+        %
+        \begin{itemize}
+          \item e.g.~JSON, XML, YAML, Protocol Buffers, etc.
+        \end{itemize}
+
+  \item how should \emph{databases} be \textbf{queried}?
+        %
+        \begin{itemize}
+          \item e.g.~SQL, NoSQL, etc.
+        \end{itemize}
+
+  \item how should components be \emph{authenticated}?
+        %
+        \begin{itemize}
+          \item e.g.~OAuth, JWT, etc.
+        \end{itemize}
+
+  \item how should components be \emph{authorized}?
+        %
+        \begin{itemize}
+          \item e.g.~RBAC, ABAC, etc.
+        \end{itemize}
+\end{itemize}
+
+\subsection{Technological details}\label{technological-details}
+
+\begin{itemize}
+  \item any particular \emph{framework} / \emph{technology} being exploited goes here
+\end{itemize}
+
+\section{Validation}\label{validation}
+
+\subsection{Automatic Testing}\label{automatic-testing}
+
+\begin{itemize}
+  \item how were individual components \textbf{\emph{unit}-test}ed?
+
+  \item how was communication, interaction, and/or integration among components tested?
+
+  \item how to \textbf{\emph{end-to-end}-test} the system?
+        %
+        \begin{itemize}
+          \item e.g.~production vs.~test environment
+        \end{itemize}
+
+  \item for each test specify:
+        %
+        \begin{itemize}
+          \item rationale of individual tests
+          \item how were the test automated
+          \item how to run them
+          \item which requirement they are testing, if any
+        \end{itemize}
+\end{itemize}
+
+\begin{quote}
+  recall that \emph{deployment} \textbf{automation} is commonly used to \emph{test} the system in \emph{production-like} environment
+\end{quote}
+
+\begin{quote}
+  recall to test corner cases (crashes, errors, etc.)
+\end{quote}
+
+\subsection{Acceptance test}\label{acceptance-test}
+
+\begin{itemize}
+  \item did you perform any \emph{manual} testing?
+        %
+        \begin{itemize}
+          \item what did you test?
+          \item why wasn't it automatic?
+        \end{itemize}
+\end{itemize}
+
+\section{Deployment}\label{deployment}
+
+\begin{itemize}
+  \item should one install your software from scratch, how to do it?
+        %
+        \begin{itemize}
+          \item provide instructions
+          \item provide expected outcomes
+        \end{itemize}
+
+  \item what software should be installed on the machines to run your project? which versions?
+
+  \item should one set environment variables or configuration files?
+
+  \item if you're using containerization (e.g.~Docker),
+        describe how you engineered your deployment scrips (e.g. \texttt{docker-compose.yml} files)
+\end{itemize}
+
+\section{User Guide}\label{user-guide}
+
+\begin{itemize}
+  \item how to use your software?
+        %
+        \begin{itemize}
+          \item provide instructions
+          \item provide expected outcomes
+          \item provide screenshots if possible
+        \end{itemize}
+\end{itemize}
+
+\section{Self-evaluation}\label{self-evaluation}
+
+\begin{itemize}
+  \item An individual section is required for each member of the group
+  \item Each member must self-evaluate their work, listing the strengths and weaknesses of the product
+  \item Each member must describe their role within the group as objectively as possible.
+\end{itemize}
+
+It should be noted that each student is only responsible for their own section.
+
+\section{Future works}\label{future-works}
+
+Discuss possible future works, improvements, extensions, optimizations, etc.
+
+Also discuss here any unimplemented feature, and how you would have implemented it.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}

@@ -1,0 +1,48 @@
+Algoritmo master:
+
+
+Mapping
+    maxRetry = 3
+    n = numero di worker disponibili
+    t = n * 0.8
+    worker_attivi = workers[:t]
+    Crea t task di mapping:
+        identificati da 1 id
+        il worker assegnato
+        la porzione dei dati
+
+    while ! all finished:
+        for w in worker_attivi:
+            w.getStatus:
+                -> pending avanti
+                -> finished aggiungi a dati works finiti
+                -> failed incrmenta contatori dei falliti e assegna a un worker libero
+                -> TIMEOUT assegna a un worker libero
+    
+    se numeroRetry > maxRetry => job failed
+
+Parititoning:
+    n = numero di worker disponibili
+    t = n * 0.8
+
+    crea una mappa partition, List<Worker>
+
+    dato il set di partizioni dividi in t task di riduzione ognuno identificato da:
+        worker assegnato
+        List<Pair<Partition, List<Worker>> dove recuperare i dati
+Reduction:
+    while ! all finished:
+    for w in worker_attivi:
+        w.getStatus:
+            -> pending avanti
+            -> finished aggiungi a dati works finiti
+            -> failed execution incrmenta contatori dei falliti e assegna a un worker libero
+            -> failed recupero dati, worker 
+                riesegui task di mapping e reinvia 
+            -> TIMEOUT assegna a un worker libero
+
+    collect risultati
+
+
+
+Algoritmo worker

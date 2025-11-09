@@ -1,0 +1,164 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "it.jmr.grpc.worker";
+option java_outer_classname = "WorkerProto";
+
+package worker;
+
+// Servizio Worker per l'esecuzione dei task Map e Reduce
+service WorkerService {
+  // Invia heartbeat al master
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  
+  // Invio di un task Map
+  rpc SubmitMapTask(SubmitMapTaskRequest) returns (SubmitMapTaskResponse);
+
+  // Recupera lo stato di un task Map
+  rpc GetMapTaskStatus(GetMapTaskStatusRequest) returns (GetMapTaskStatusResponse);
+
+  // Esegue un task Reduce
+  rpc SubmitReduceTask(SubmitReduceTaskRequest) returns (SubmitReduceTaskResponse);
+
+  // Recupera lo stato di un task reduce
+  rpc GetReduceTaskStatus(GetReduceTaskStatusRequest) returns (GetReduceTaskStatusResponse);
+
+  // Recupera dati intermedi dal worker
+  rpc FetchIntermediateData(FetchIntermediateDataRequest) returns (stream IntermediateDataChunk);
+  
+  // Ottiene lo stato del worker
+  rpc GetWorkerStatus(GetWorkerStatusRequest) returns (GetWorkerStatusResponse);
+}
+
+message WorkerResources {
+  int32 num_cores = 1;
+  int64 memory_mb = 2;
+  int64 disk_mb = 3;
+}
+
+// Heartbeat
+message HeartbeatRequest {
+  string worker_id = 1;
+  WorkerStatus status = 2;
+}
+
+message HeartbeatResponse {
+  bool ok = 1;
+}
+
+message WorkerStatus {
+  int32 active_tasks = 1;
+  double cpu_usage = 2;
+  double memory_usage = 3;
+}
+
+// Task map status
+message GetMapTaskStatusRequest {
+  string task_id = 1;
+  string job_id = 2;
+}
+
+message GetMapTaskStatusResponse {
+  TaskState state = 1;
+  repeated IntermediateDataLocation locations = 2;
+}
+
+// Task Map
+message SubmitMapTaskRequest {
+  string task_id = 1;
+  string job_id = 2;
+  int64 offset = 3;                    // Offset nel dataset
+  int64 limit = 4;                     // Numero di elementi da processare
+  string jar_id = 5;                   // Jar da dove recuperare la classe
+}
+
+message SubmitMapTaskResponse {
+  bool success = 1;
+}
+
+enum TaskState {
+    TASK_MISSING = 0;
+    TASK_RUNNING = 1;
+    TASK_COMPLETED = 2;
+    TASK_FAILED = 3;
+}
+
+message PartitionInfo {
+  int32 partition_id = 1;              // ID della partizione (0 a num_reduce_tasks-1)
+  repeated string keys = 2;             // Chiavi contenute in questa partizione
+  string storage_location = 3;          // Dove sono salvati i dati (es. "worker1:8080/data/task1_part0")
+
+
+}
+
+// Task Reduce
+message SubmitReduceTaskRequest {
+  string task_id = 1;
+  string job_id = 2;
+  int32 partition_id = 3;
+  string jar_id = 4;                                // Jar da dove recuperare la classe
+  repeated IntermediateDataLocation locations = 5;  // Dove recuperare i dati intermedi
+}
+
+message IntermediateDataLocation {
+  string worker_id = 1;
+  string task_id = 2;
+  string partition_id = 3;
+}
+
+message SubmitReduceTaskResponse {
+  bool success = 1;
+  string task_id = 2;
+  OutputDataLocation output_location = 3;
+  string error_message = 4;
+  int64 records_processed = 5;
+  int64 execution_time_ms = 6;
+}
+
+message OutputDataLocation {
+  string worker_id = 1;
+  string worker_host = 2;
+  int32 worker_port = 3;
+  string path = 4;                      // Path relativo sul worker
+  int64 size_bytes = 5;
+}
+
+// Fetch dati intermedi
+message FetchIntermediateDataRequest {
+  string task_id = 1;
+  string partition_id = 2;
+}
+
+message IntermediateDataChunk {
+  bytes data = 1;                       // Dati serializzati (coppie chiave-valore)
+  bool is_last = 2;
+}
+
+// Status worker
+message GetWorkerStatusRequest {
+  string worker_id = 1;
+}
+
+message GetWorkerStatusResponse {
+  string worker_id = 1;
+  WorkerState state = 2;
+  int32 completed_tasks = 3;
+  int32 failed_tasks = 4;
+  WorkerStatus current_status = 5;
+}
+
+enum WorkerState {
+  IDLE = 0;
+  BUSY = 1;
+  FAILED = 2;
+}
+
+message GetReduceTaskStatusRequest {
+  string task_id = 1;
+  string job_id = 2;
+}
+
+message GetReduceTaskStatusResponse {
+  TaskState state = 1;
+  repeated IntermediateDataLocation locations = 2;
+}
