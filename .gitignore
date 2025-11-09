@@ -54,3 +54,7 @@ build/
 # Other
 out/
 bin/
+
+
+worker-data/
+master-data/
