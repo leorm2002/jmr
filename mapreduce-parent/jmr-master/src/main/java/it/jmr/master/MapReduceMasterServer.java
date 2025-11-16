@@ -13,7 +13,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class MapReduceMasterServer {
+public class MapReduceMasterServer implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger(MapReduceMasterServer.class);
     private final MasterContext ctx;
     private final Server server;
@@ -21,21 +21,17 @@ public class MapReduceMasterServer {
     public MapReduceMasterServer(int port, List<WorkerI> workers, String jarStorageDir, String jobStorageDir) {
         this.ctx = new MasterContext(port, jarStorageDir, jobStorageDir, workers);
 
-        // Creating JAR storage directory if it doesn't exist
         new File(jarStorageDir).mkdirs();
-        JMRLog.debug(LOGGER, "JAR storage directory: " + jarStorageDir);
+        JMRLog.debug(LOGGER, "JAR storage directory: {}", jarStorageDir);
 
         new File(jobStorageDir).mkdirs();
-        JMRLog.debug(LOGGER, "Job storage directory: " + jobStorageDir);
+        JMRLog.debug(LOGGER, "Job storage directory: {}", jobStorageDir);
 
-        // Starting the job executor
         JMRLog.debug(LOGGER, "Starting the job executor...");
         ExecutorManager.getExecutor().submit(new MasterExecutor(ctx));
-        // Avvio il monitor della salute dei worker
         JMRLog.debug(LOGGER, "Starting the worker health monitor...");
         ExecutorManager.getExecutor().submit(new WorkerMonitor(ctx));
 
-        // Avvio il server gRPC
         JMRLog.debug(LOGGER, "Starting the gRPC server...");
         this.server = ServerBuilder.forPort(port) //
                 .addService(new MapReduceServiceImpl(ctx.jarsPaths, ctx.jobsPaths, ctx.jobQueue)) //
@@ -47,15 +43,15 @@ public class MapReduceMasterServer {
 
     public void start() throws IOException {
         server.start();
-        System.out.println("╔════════════════════════════════════════╗");
-        System.out.println("║   MapReduce Master Server v2.0 (gRPC)  ║");
-        System.out.println("╚════════════════════════════════════════╝");
-        System.out.println("Porta: " + ctx.port);
-        System.out.println("Storage JAR: " + new File(ctx.jarStorageDir).getAbsolutePath());
-        System.out.println("\nServer gRPC in ascolto...\n");
+        LOGGER.info("╔════════════════════════════════════════╗");
+        LOGGER.info("║   MapReduce Master Server v2.0 (gRPC)  ║");
+        LOGGER.info("╚════════════════════════════════════════╝");
+        LOGGER.info("Port: {}", ctx.port);
+        LOGGER.info("JAR Storage: {}", new File(ctx.jarStorageDir).getAbsolutePath());
+        LOGGER.info("\ngRPC server listening...\n");
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.err.println("\nShutdown del server...");
+            LOGGER.info("\nShutting down server...");
             MapReduceMasterServer.this.stop();
         }));
     }
@@ -71,5 +67,10 @@ public class MapReduceMasterServer {
         if (server != null) {
             server.awaitTermination();
         }
+    }
+
+    @Override
+    public void close() throws Exception {
+        stop();
     }
 }

@@ -10,6 +10,10 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import it.jmr.common.exceptions.JMRException;
 import it.jmr.common.jarservice.JobClassLoader;
 import it.jmr.common.jarservice.JobClassLoaderOld;
 import it.jmr.common.models.JobConfiguration;
@@ -26,22 +30,26 @@ import it.jmr.worker.models.WorkerContext;
  */
 public class WorkerExecutor {
 
-    public static <D extends Serializable, V extends Serializable, O extends Serializable> void executeReduce(SubmitReduceTaskRequest request) {
+    private static final Logger LOGGER = LoggerFactory.getLogger(WorkerExecutor.class);
 
+    public static <D extends Serializable, V extends Serializable, O extends Serializable> void executeReduce(SubmitReduceTaskRequest request)
+            throws JMRException {
+        LOGGER.info("Executing reduce task for job {}", request.getJobId());
         try (JobClassLoaderOld classLoader = new JobClassLoaderOld(request.getJarId())) {
             String jarId = request.getJarId();
             JobConfiguration<D, V, O> jobConfig;
             try {
                 jobConfig = new JobClassLoader(jarId, "job.ser").deserializeFromFile();
             } catch (Exception e) {
-                throw new RuntimeException("Error in the loading of the job from the jar: " + e.getMessage(), e);
+                LOGGER.error("Error loading job from jar", e);
+                throw new JMRException("Error loading job from jar: " + e.getMessage(), e);
             }
 
             final SerializableReducer<V, O> reducer = jobConfig.getReducer();
-            // Recupera i dati da location intermedie
+            // Retrieve data from intermediate locations
             List<Pair<String, List<V>>> mappedData = Collections.emptyList();
 
-            // Esegue la riduzione
+            // Execute the reduction
 
             Set<Entry<String, List<List<V>>>> partitionedData = mappedData.parallelStream()
                     .collect(Collectors.groupingByConcurrent(Pair::getFirst, Collectors.mapping(Pair::getSecond, Collectors.toList()))).entrySet();
@@ -50,24 +58,11 @@ public class WorkerExecutor {
                     .map(e -> reducer.apply(e.getKey(), e.getValue().stream().flatMap(List::stream).collect(Collectors.toList())))
                     .collect(Collectors.toList());
 
-            // System.out.println("--- Output del job ---");
-            // System.out.println(reducedData);
-            // System.out.println("--- Fine output ---");
+            LOGGER.info("Reduce task for job {} completed", request.getJobId());
 
         } catch (Exception e) {
-            // jobInfo.setStatus(JobStatus.FAILED);
-            // jobInfo.setErrorMessage(e.getMessage());
-            // jobInfo.notifyEvent("Job fallito: " + e.getMessage());
-            // System.err.println("<<< Job fallito: " + jobInfo.getJobId());
-            // e.printStackTrace();
-        } finally {
-            // Libero il posto in coda
-            // jobQueue.poll();
-            // Eliminro il jar
-            // new File(jobInfo.getJarPath()).delete();
-            // jarsPaths.remove(jobInfo.getJarPath());
-            // Notifico la fine agli listeners
-            // jobInfo.completeEventListeners();
+            LOGGER.error("Error executing reduce task for job {}", request.getJobId(), e);
+            throw new JMRException("Error executing reduce task", e);
         }
     }
 
@@ -75,12 +70,12 @@ public class WorkerExecutor {
      * Executes the map task as per the request
      */
     public static <D extends Serializable, K extends Serializable, V extends Serializable, O extends Serializable> Map<String, List<V>> executeMap(
-            SubmitMapTaskRequest request, WorkerContext ctx) {
-
-        // 1. Carica il job dal jar
-        // 2. Recupera i dati dal DataProvider
-        // 3. Esegui la mappatura
-        // 4. Salva i dati intermedi
+            SubmitMapTaskRequest request, WorkerContext ctx) throws JMRException {
+        LOGGER.info("Executing map task {} for job {}", request.getTaskId(), request.getJobId());
+        // 1. Load the job from the jar
+        // 2. Retrieve data from the DataProvider
+        // 3. Execute the mapping
+        // 4. Save the intermediate data
 
         // 1st step: load the job configuration
         final String jarId = request.getJarId();
@@ -92,9 +87,10 @@ public class WorkerExecutor {
         try {
             jobConfig = new JobClassLoader(jarPath, jobPath).deserializeFromFile();
         } catch (Exception e) {
-            throw new RuntimeException("Error in the loading of the job from the jar: " + e.getMessage(), e);
+            LOGGER.error("Error loading job from jar", e);
+            throw new JMRException("Error loading job from jar: " + e.getMessage(), e);
         }
-        // JobClassLoaderOld.loadJob(jarId, mainClass);
+
         final DataProviderClient<D> provider = jobConfig.getDataProvider();
         final SerializableMapper<D, V> mapper = jobConfig.getMapper();
 
@@ -104,19 +100,24 @@ public class WorkerExecutor {
         try (final DataProviderClient<D> autoProvider = provider) {
             autoProvider.init();
             try {
+                LOGGER.debug("Fetching chunk from offset {} with limit {}", request.getOffset(), request.getLimit());
                 data = autoProvider.fetchChunk(request.getOffset(), request.getLimit());
-            } catch (IOException e) {
-                throw new RuntimeException("Error fetching data from DataProvider: " + e.getMessage(), e);
+                LOGGER.debug("Fetched {} records", data.size());
+            } catch (JMRException e) {
+                LOGGER.error("Error fetching data from DataProvider", e);
+                throw new JMRException("Error fetching data from DataProvider: " + e.getMessage(), e);
             }
         } catch (Exception e) {
-            throw new RuntimeException("Error initializing DataProviderClient: " + e.getMessage(), e);
+            LOGGER.error("Error initializing DataProviderClient", e);
+            throw new JMRException("Error initializing DataProviderClient: " + e.getMessage(), e);
         }
 
         // 3rd step: map data
+        LOGGER.debug("Mapping data...");
         final Map<String, List<V>> mappedData = data.parallelStream().map(mapper::apply).flatMap(Collection::stream)
                 // Sorting and partitioning
                 .collect(Collectors.groupingBy(Pair::getFirst, Collectors.mapping(Pair::getSecond, Collectors.toList())));
-
+        LOGGER.info("Map task {} for job {} completed", request.getTaskId(), request.getJobId());
         // 4th step: return mapped data
         return mappedData;
     }

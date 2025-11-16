@@ -12,6 +12,7 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 
 import it.jmr.common.discovery.DiscoveryService;
+import it.jmr.common.exceptions.JMRException;
 import it.jmr.common.utils.JMRLog;
 
 public class MasterLauncher {
@@ -26,7 +27,7 @@ public class MasterLauncher {
     @Parameter(names = { "--jobStorageDirectory", "-josd" }, required = true, description = "The directory where job files will be stored")
     private String jobStorageDirectory;
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) throws JMRException {
 
         // 1. Parse command line arguments
         final MasterLauncher app = new MasterLauncher();
@@ -41,30 +42,37 @@ public class MasterLauncher {
         final String jobStorageDirectory = app.jobStorageDirectory;
 
         // 2. Search for workers on the network
-        DiscoveryService discovery = new DiscoveryService("_jmr._tcp.local.");
-        List<ServiceInfo> found = discovery.discover(2);
+        LOGGER.info("Discovering workers on the network...");
+        try {
+            DiscoveryService discovery = new DiscoveryService("_jmr._tcp.local.");
+            List<ServiceInfo> found = discovery.discover(2);
 
-        // 3. Start the master server
+            // 3. Start the master server
 
-        List<WorkerI> workers = found.stream()
-                .collect(java.util.stream.Collectors.toMap(ServiceInfo::getName,
-                        serviceInfo -> new WorkerI(serviceInfo.getName(), serviceInfo.getHostAddresses()[0], serviceInfo.getPort()),
-                        (existing, replacement) -> existing // keep the first occurrence
-                )).values().stream().toList();
+            List<WorkerI> workers = found.stream()
+                    .collect(java.util.stream.Collectors.toMap(ServiceInfo::getName,
+                            serviceInfo -> new WorkerI(serviceInfo.getName(), serviceInfo.getHostAddresses()[0], serviceInfo.getPort()),
+                            (existing, replacement) -> existing // keep the first occurrence
+                    )).values().stream().toList();
 
-        if (workers.isEmpty()) {
-            JMRLog.debug(LOGGER, "No workers found on the network. The master will start with no workers.");
-            System.exit(0);
-        } else {
-            JMRLog.debug(LOGGER, "Discovered workers:");
-            for (WorkerI worker : workers) {
-                JMRLog.debug(LOGGER, " - {} at {}:{}", worker.workerId(), worker.address(), worker.port());
+            if (workers.isEmpty()) {
+                JMRLog.warn(LOGGER, "No workers found on the network. The master will start with no workers.");
+                System.exit(0);
+
+            } else {
+                JMRLog.info(LOGGER, "Discovered workers:");
+                for (WorkerI worker : workers) {
+                    JMRLog.info(LOGGER, " - {} at {}:{}", worker.workerId(), worker.address(), worker.port());
+                }
             }
-        }
 
-        MapReduceMasterServer master = new MapReduceMasterServer(port, workers, jarStorageDirectory, jobStorageDirectory);
-        master.start();
-        master.blockUntilShutdown();
+            try (MapReduceMasterServer master = new MapReduceMasterServer(port, workers, jarStorageDirectory, jobStorageDirectory)) {
+                master.start();
+                master.blockUntilShutdown();
+            }
+        } catch (Exception e) {
+            throw new JMRException("Error during master startup", e);
+        }
     }
 
 }

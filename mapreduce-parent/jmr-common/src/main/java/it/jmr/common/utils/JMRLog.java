@@ -22,6 +22,14 @@ public class JMRLog {
         logger.debug(message, getPrintableArguments(args));
     }
 
+    public static void warn(Logger logger, String message, Object... args) {
+        logger.warn(message, getPrintableArguments(args));
+    }
+
+    public static void trace(Logger logger, String message, Object... args) {
+        logger.trace(message, getPrintableArguments(args));
+    }
+
     private static Object[] getPrintableArguments(Object[] arguments) {
         return Arrays.stream(arguments).filter(Objects::nonNull).map(Object::toString).toArray();
     }

@@ -8,12 +8,17 @@ import java.nio.file.Paths;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.grpc.stub.StreamObserver;
+import it.jmr.common.exceptions.JMRException;
 import it.jmr.grpc.JobChunk;
 import it.jmr.grpc.JobServiceGrpc;
 import it.jmr.grpc.UploadJobResponse;
 
 public class JobServiceImpl extends JobServiceGrpc.JobServiceImplBase {
+    private static final Logger LOGGER = LoggerFactory.getLogger(JobServiceImpl.class);
     private ConcurrentHashMap<String, String> jobStorage;
     private String jobStorageDir;
 
@@ -37,12 +42,14 @@ public class JobServiceImpl extends JobServiceGrpc.JobServiceImplBase {
                 try {
                     outputStream.write(chunk.getContent().toByteArray());
                 } catch (IOException e) {
-                    onError(e);
+                    LOGGER.error("Error writing job chunk to stream", e);
+                    onError(new JMRException("Error writing job chunk to stream", e));
                 }
             }
 
             @Override
             public void onError(Throwable t) {
+                LOGGER.error("Error during job upload", t);
                 responseObserver.onError(t);
             }
 
@@ -56,15 +63,17 @@ public class JobServiceImpl extends JobServiceGrpc.JobServiceImplBase {
                     jobStorage.put(filename, filepath.toString());
                     // Save the file to disk
                     Files.write(filepath, fileData);
+                    LOGGER.info("Job file saved to {}", filepath);
 
-                    // Rispondi al client
-                    final UploadJobResponse response = UploadJobResponse.newBuilder().setSuccess(true).setMessage("File caricato via streaming")
+                    // Respond to the client
+                    final UploadJobResponse response = UploadJobResponse.newBuilder().setSuccess(true).setMessage("File uploaded via streaming")
                             .setJobId(filename).build();
 
                     responseObserver.onNext(response);
                     responseObserver.onCompleted();
                 } catch (IOException e) {
-                    responseObserver.onError(e);
+                    LOGGER.error("Error saving job file", e);
+                    responseObserver.onError(new JMRException("Error saving job file", e));
                 }
             }
         };

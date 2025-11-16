@@ -3,7 +3,11 @@ package it.jmr.common.utils;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class ExecutorManager {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ExecutorManager.class);
     private static final ExecutorService EXECUTOR =Executors.newVirtualThreadPerTaskExecutor();
 
     private ExecutorManager() {}
@@ -14,7 +18,7 @@ public class ExecutorManager {
 
     public static void shutdown() {
         EXECUTOR.shutdownNow();
-        System.out.println("🛑 Executor terminato.");
+        LOGGER.info("🛑 Executor terminated.");
     }
 }
 

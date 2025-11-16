@@ -4,6 +4,7 @@ import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.StreamObserver;
 import it.jmr.common.JMRConstants;
+import it.jmr.common.exceptions.JMRException;
 import it.jmr.common.providers.DataProvider;
 import it.jmr.common.providers.DataProviderClient;
 import it.jmr.grpcdataprovider.Container;
@@ -26,7 +27,8 @@ public class LocalGrpcDataProvider<D extends Serializable> implements DataProvid
     private volatile boolean initialized = false;
     private final Object lock = new Object();
     private int serverPort;
-    private String serverHost = "localhost"; // Può essere configurato
+    // Can be overridden for distributed deployment
+    private String serverHost = "localhost";
 
     public void blockUntilShutdown() throws InterruptedException {
         if (grpcServer != null) {
@@ -34,22 +36,22 @@ public class LocalGrpcDataProvider<D extends Serializable> implements DataProvid
         }
     }
 
-    public LocalGrpcDataProvider(Path filePath) {
+    public LocalGrpcDataProvider(Path filePath) throws JMRException {
         try (var in = java.nio.file.Files.newInputStream(filePath); var ois = new ObjectInputStream(in)) {
             data = ((Container<D>) ois.readObject()).data;
             init();
         } catch (IOException | ClassNotFoundException e) {
-            throw new RuntimeException("Failed to load data from file: " + filePath, e);
+            throw new JMRException("Failed to load data from file: " + filePath, e);
         }
     }
 
-    public LocalGrpcDataProvider(List<Path> filePath) {
+    public LocalGrpcDataProvider(List<Path> filePath) throws JMRException {
         List<D> loadedData = new ArrayList<>();
         for (Path path : filePath) {
             try (var in = java.nio.file.Files.newInputStream(path); var ois = new ObjectInputStream(in)) {
                 loadedData.addAll(((Container<D>) ois.readObject()).data);
             } catch (IOException | ClassNotFoundException e) {
-                throw new RuntimeException("Failed to load data from file: " + path, e);
+                throw new JMRException("Failed to load data from file: " + path, e);
             }
         }
         data = loadedData;
@@ -59,7 +61,7 @@ public class LocalGrpcDataProvider<D extends Serializable> implements DataProvid
     /**
      * Costruttore con host configurabile per deployment distribuito.
      */
-    public LocalGrpcDataProvider(Path filePath, String host) {
+    public LocalGrpcDataProvider(Path filePath, String host) throws JMRException {
         this(filePath);
         this.serverHost = host;
     }
@@ -95,7 +97,7 @@ public class LocalGrpcDataProvider<D extends Serializable> implements DataProvid
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() {
         synchronized (lock) {
             if (grpcServer != null) {
                 try {

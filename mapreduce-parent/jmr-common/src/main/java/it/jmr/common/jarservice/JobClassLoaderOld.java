@@ -5,10 +5,15 @@ import java.io.Serializable;
 import java.net.URL;
 import java.net.URLClassLoader;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import it.jmr.common.models.JobConfiguration;
 import it.jmr.common.utils.Pair;
 
 public class JobClassLoaderOld extends URLClassLoader {
+    private static final Logger LOGGER = LoggerFactory.getLogger(JobClassLoaderOld.class);
+
     public JobClassLoaderOld(String jarPath) throws Exception {
         super(new URL[] { new File(jarPath).toURI().toURL() },
                 JobClassLoaderOld.class.getClassLoader());
@@ -35,15 +40,15 @@ public class JobClassLoaderOld extends URLClassLoader {
             Class<?> c = findLoadedClass(name);
 
             if (c == null) {
-                // IMPORTANTE: Le tue interfacce/classi base devono essere caricate dal PARENT
-                // Solo le implementazioni dell'utente vengono caricate dal JAR
-                if (name.startsWith("com.tuopackage.api.") || // Le tue interfacce
+                // IMPORTANT: Your interfaces/base classes must be loaded by the PARENT
+                // Only user implementations are loaded from the JAR
+                if (name.startsWith("com.yourpackage.api.") || // Your interfaces
                         name.startsWith("java.") ||
                         name.startsWith("javax.")) {
-                    // Delega sempre al parent per le classi condivise
+                    // Always delegate to the parent for shared classes
                     c = getParent().loadClass(name);
                 } else {
-                    // Per le classi dell'utente, cerca prima nel JAR
+                    // For user classes, first search in the JAR
                     try {
                         c = findClass(name);
                     } catch (ClassNotFoundException e) {
@@ -63,10 +68,10 @@ public class JobClassLoaderOld extends URLClassLoader {
     public static <D extends Serializable, K extends Serializable, V extends Serializable, O extends Serializable> JobConfiguration<D, V, O> loadJob(
             String jarId, String mainClass) {
 
-        // 1. Carica il job dal jar
-        // 2. Recupera i dati dal DataProvider
-        // 3. Esegui la mappatura
-        // 4. Salva i dati intermedi
+        // 1. Load the job from the jar
+        // 2. Retrieve data from the DataProvider
+        // 3. Execute the mapping
+        // 4. Save the intermediate data
 
         try (JobClassLoaderOld classLoader = new JobClassLoaderOld(jarId)) {
             Thread.currentThread().setContextClassLoader(classLoader);
@@ -80,7 +85,8 @@ public class JobClassLoaderOld extends URLClassLoader {
             return jobConfig;
 
         } catch (Exception e) {
-            throw new RuntimeException("Error in the loading of the job from the jar: " + e.getMessage(), e);
+            LOGGER.error("Error loading job from jar", e);
+            throw new RuntimeException("Error loading job from jar: " + e.getMessage(), e);
         }
     }
 

@@ -3,6 +3,8 @@ package it.jmr.master;
 import java.util.ArrayList;
 import java.util.List;
 
+import it.jmr.client.JMRClient;
+import it.jmr.common.JMRConstants;
 import it.jmr.common.utils.JMRLog;
 import it.jmr.common.utils.JmrUtils;
 import it.jmr.master.models.Worker;
@@ -21,6 +23,7 @@ public class WorkerMonitor implements Runnable {
 
     @Override
     public void run() {
+        JMRLog.info(LOGGER, "Worker monitor started");
         while (!Thread.currentThread().isInterrupted()) {
             final List<Worker> deadWorkers = new ArrayList<>();
             for (Worker worker : ctx.workers) {
@@ -34,7 +37,7 @@ public class WorkerMonitor implements Runnable {
             ctx.workers.removeAll(deadWorkers);
 
             // Sleep for a while before next check
-            JmrUtils.sleep(5000);
+            JmrUtils.sleep(JMRConstants.DEAD_WORKER_MONITOR_SLEEP_MS);
         }
     }
 

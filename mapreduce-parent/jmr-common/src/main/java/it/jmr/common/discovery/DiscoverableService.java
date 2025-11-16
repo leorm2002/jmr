@@ -3,17 +3,21 @@ package it.jmr.common.discovery;
 import javax.jmdns.JmDNS;
 import javax.jmdns.ServiceInfo;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import it.jmr.common.utils.ExecutorManager;
+import it.jmr.common.utils.JmrUtils;
 
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.concurrent.ExecutorService;
 
-
 /**
- * Mantiene un servizio discoverable attivo finché il programma vive.
+ * Keeps a discoverable service active as long as the program is running.
  */
 public class DiscoverableService implements AutoCloseable {
+    private static final Logger LOGGER = LoggerFactory.getLogger(DiscoverableService.class);
     private final String serviceName;
     private final String serviceType;
     private final int port;
@@ -26,9 +30,10 @@ public class DiscoverableService implements AutoCloseable {
         this.port = port;
     }
 
-    /** Avvia il servizio in un virtual thread (persistente) */
+    /** Starts the service in a persistent virtual thread */
     public void start() {
-        if (running) return;
+        if (running)
+            return;
         running = true;
 
         ExecutorService executor = ExecutorManager.getExecutor();
@@ -38,13 +43,14 @@ public class DiscoverableService implements AutoCloseable {
                 jmdns = JmDNS.create(addr);
                 ServiceInfo info = ServiceInfo.create(serviceType, serviceName, port, "Running service");
                 jmdns.registerService(info);
-                System.out.printf("Servizio '%s' registrato su %s:%d%n",
-                        serviceName, addr.getHostAddress(), port);
+                LOGGER.info("Service '{}' registered at {}:{}", serviceName, addr.getHostAddress(), port);
 
-                // rimane vivo finché running = true
-                while (running) Thread.sleep(1000);
-            } catch (IOException | InterruptedException e) {
-                System.err.println("Errore in DiscoverableService: " + e.getMessage());
+                // stays alive as long as running = true
+                while (running) {
+                    JmrUtils.sleep(1000);
+                }
+            } catch (IOException e) {
+                LOGGER.error("Error in DiscoverableService", e);
             }
         });
     }
@@ -55,7 +61,7 @@ public class DiscoverableService implements AutoCloseable {
         if (jmdns != null) {
             jmdns.unregisterAllServices();
             jmdns.close();
-            System.out.printf("Servizio '%s' deregistrato%n", serviceName);
+            LOGGER.info("Service '{}' unregistered", serviceName);
         }
     }
 }

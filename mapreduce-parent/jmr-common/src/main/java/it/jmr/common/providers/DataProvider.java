@@ -1,32 +1,33 @@
 package it.jmr.common.providers;
 
-import java.io.IOException;
 import java.io.Serializable;
 
+import it.jmr.common.exceptions.JMRException;
+
 /**
- * Interfaccia per un DataProvider server-side. Gestisce i dati localmente e può
- * creare client per accesso remoto.
+ * Interface for a server-side DataProvider. Manages data locally and can create
+ * clients for remote access.
  */
 public interface DataProvider<D extends Serializable> extends Serializable {
     static final long serialVersionUID = 1L;
 
     /**
-     * Inizializza il provider e avvia il worker server.
+     * Initializes the provider and starts the worker server.
      */
-    DataProvider<D> init();
+    DataProvider<D> init() throws JMRException;
 
     /**
-     * Crea un client preconfigurato per accesso remoto a questo provider. Il client
-     * può essere serializzato e inviato ai worker remoti.
+     * Creates a pre-configured client for remote access to this provider. The
+     * client can be serialized and sent to remote workers.
      *
-     * @return un DataProviderClient configurato per connettersi a questo server.
+     * @return a DataProviderClient configured to connect to this server.
      */
-    DataProviderClient<D> getClient();
+    DataProviderClient<D> getClient() throws JMRException;
 
     /**
-     * Rilascia eventuali risorse (connessioni, file handler, worker server, ecc.).
+     * Releases any resources (connections, file handlers, worker server, etc.).
      *
-     * @throws IOException se il rilascio risorse fallisce.
+     * @throws JMRException if resource release fails.
      */
-    void close() throws IOException;
+    void close() throws JMRException;
 }

@@ -4,43 +4,45 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.List;
 
+import it.jmr.common.exceptions.JMRException;
+
 /**
- * Interfaccia per un client remoto che accede a un DataProvider.
- * Implementazioni di questa interfaccia sono serializzabili e possono essere
- * inviate dal master ai worker remoti per accedere ai dati distribuiti.
+ * Interface for a remote client that accesses a DataProvider. Implementations
+ * of this interface are serializable and can be sent from the master to remote
+ * workers to access distributed data.
  */
 public interface DataProviderClient<D extends Serializable> extends Serializable, AutoCloseable {
     static final long serialVersionUID = 1L;
 
     /**
-     * Inizializza la connessione al server remoto. Deve essere chiamato prima di
-     * qualsiasi operazione di fetch.
+     * Initializes the connection to the remote server. Must be called before any
+     * fetch operation.
      */
     void init();
 
     /**
-     * Restituisce la dimensione totale dei dati dal server remoto.
+     * Returns the total size of the data from the remote server.
      *
-     * @return numero totale di elementi disponibili.
-     * @throws IOException se si verificano problemi di connessione o accesso.
+     * @return total number of available items.
+     * @throws JMRException if connection or access problems occur.
      */
-    long size() throws IOException;
+    long size() throws JMRException;
 
     /**
-     * Recupera un blocco di dati dal server remoto.
+     * Retrieves a block of data from the remote server.
      *
-     * @param offset posizione iniziale (0-based).
-     * @param limit  numero massimo di elementi da leggere.
-     * @return lista di elementi recuperati (può essere vuota se offset >= size).
-     * @throws IOException se si verificano problemi di connessione o accesso.
+     * @param offset starting position (0-based).
+     * @param limit  maximum number of items to read.
+     * @return list of retrieved items (can be empty if offset >= size).
+     * @throws JMRException if connection or access problems occur.
      */
-    List<D> fetchChunk(long offset, long limit) throws IOException;
+    List<D> fetchChunk(long offset, long limit) throws JMRException;
 
     /**
-     * Chiude la connessione al server remoto.
+     * Closes the connection to the remote server.
      *
-     * @throws IOException se la chiusura fallisce.
+     * @throws JMRException if closing fails.
      */
     @Override
-    void close() throws IOException;
+    void close() throws JMRException;
 }

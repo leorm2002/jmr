@@ -2,6 +2,7 @@ package it.jmr.grpcdataprovider.remotegrpc;
 
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import it.jmr.common.exceptions.JMRException;
 import it.jmr.common.providers.DataProviderClient;
 import it.jmr.grpcdataprovider.grpc.*;
 
@@ -49,19 +50,19 @@ public class RemoteGrpcDataProviderClient<D extends Serializable> implements Dat
     }
 
     @Override
-    public long size() throws IOException {
+    public long size() throws JMRException {
         ensureInitialized();
         try {
             SizeRequest request = SizeRequest.newBuilder().build();
             SizeResponse response = blockingStub.getSize(request);
             return response.getSize();
         } catch (Exception e) {
-            throw new IOException("Failed to get size from remote server at " + host + ":" + port, e);
+            throw new JMRException("Failed to get size from remote server at " + host + ":" + port, e);
         }
     }
 
     @Override
-    public List<D> fetchChunk(long offset, long limit) throws IOException {
+    public List<D> fetchChunk(long offset, long limit) throws JMRException {
         ensureInitialized();
         try {
             ChunkRequest request = ChunkRequest.newBuilder().setOffset(offset).setLimit(limit).build();
@@ -76,12 +77,12 @@ public class RemoteGrpcDataProviderClient<D extends Serializable> implements Dat
 
             return result;
         } catch (Exception e) {
-            throw new IOException("Failed to fetch chunk from remote server at " + host + ":" + port, e);
+            throw new JMRException("Failed to fetch chunk from remote server at " + host + ":" + port, e);
         }
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() throws JMRException {
         if (channel != null) {
             try {
                 channel.shutdown();
@@ -96,9 +97,9 @@ public class RemoteGrpcDataProviderClient<D extends Serializable> implements Dat
         }
     }
 
-    private void ensureInitialized() throws IOException {
+    private void ensureInitialized() throws JMRException {
         if (channel == null || blockingStub == null) {
-            throw new IOException("Client not initialized. Call init() first.");
+            throw new JMRException("Client not initialized. Call init() first.");
         }
     }
 

@@ -1,7 +1,6 @@
 package it.jmr.worker;
 
 import java.io.ByteArrayOutputStream;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
@@ -16,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import io.grpc.stub.StreamObserver;
 import it.jmr.common.PartitionInfo;
 import it.jmr.common.WorkerTaskStatus;
+import it.jmr.common.exceptions.JMRException;
 import it.jmr.common.utils.JMRLog;
 import it.jmr.common.utils.Pair;
 import it.jmr.grpc.worker.SubmitMapTaskRequest;
@@ -49,6 +49,7 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
 
     @Override
     public void heartbeat(HeartbeatRequest request, StreamObserver<HeartbeatResponse> responseObserver) {
+        JMRLog.trace(LOGGER, "Received heartbeat from {}", request.getWorkerId());
         final HeartbeatResponse response = HeartbeatResponse.newBuilder().setOk(true).build();
         responseObserver.onNext(response);
         responseObserver.onCompleted();
@@ -59,27 +60,28 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
 
         final String jobId = request.getJobId();
         final String taskId = request.getTaskId();
+        JMRLog.debug(LOGGER, "Received getMapTaskStatus request for task {} of job {}", taskId, jobId);
 
         final WorkerTaskStatus status = workerNode.statusMap.getOrDefault(Pair.of(jobId, taskId), WorkerTaskStatus.MISSING);
 
         if (status == WorkerTaskStatus.MISSING) {
             responseObserver.onNext(GetMapTaskStatusResponse.newBuilder().setState(TaskState.TASK_MISSING).build());
             responseObserver.onCompleted();
-            JMRLog.debug(LOGGER, "    Task MAP mancante: " + taskId + " per job: " + jobId);
+            JMRLog.warn(LOGGER, "Map task {} for job {} is missing", taskId, jobId);
             return;
         }
 
         if (status == WorkerTaskStatus.RUNNING) {
             responseObserver.onNext(GetMapTaskStatusResponse.newBuilder().setState(TaskState.TASK_RUNNING).build());
             responseObserver.onCompleted();
-            JMRLog.debug(LOGGER, "    Task MAP in esecuzione: " + taskId + " per job: " + jobId);
+            JMRLog.debug(LOGGER, "Map task {} for job {} is running", taskId, jobId);
             return;
         }
 
         if (status == WorkerTaskStatus.FAILED) {
             responseObserver.onNext(GetMapTaskStatusResponse.newBuilder().setState(TaskState.TASK_FAILED).build());
             responseObserver.onCompleted();
-            JMRLog.debug(LOGGER, "    Task MAP fallito: " + taskId + " per job: " + jobId);
+            JMRLog.error(LOGGER, "Map task {} for job {} has failed", taskId, jobId);
             return;
         }
 
@@ -91,7 +93,7 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
                     .setTaskId(partitionInfo.getPartitionId()).setPartitionId(partitionInfo.getKey()).build();
             locations.add(loc);
         }
-        JMRLog.debug(LOGGER, "    Task MAP completato: " + taskId + " per job: " + jobId);
+        JMRLog.debug(LOGGER, "Map task {} for job {} is completed", taskId, jobId);
 
         responseObserver.onNext(GetMapTaskStatusResponse.newBuilder().addAllLocations(locations).setState(TaskState.TASK_COMPLETED).build());
         responseObserver.onCompleted();
@@ -103,20 +105,20 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         final String jobId = request.getJobId();
         final String taskId = request.getTaskId();
 
-        JMRLog.debug(LOGGER, "\n>>> Ricevuto MAP task: " + taskId + " per job: " + jobId);
+        JMRLog.info(LOGGER, "\n>>> Received MAP task: {} for job: {}", taskId, jobId);
 
-        // Se il worker è occupato, rifiuta il task
+        // If the worker is busy, reject the task
         boolean success;
         if (this.workerNode.busy) {
-            JMRLog.error(LOGGER, "    Worker occupato. Rifiutato il task: " + request.getTaskId());
+            JMRLog.warn(LOGGER, "Worker is busy. Rejecting task: {}", request.getTaskId());
             success = false;
         } else {
-            // Imposto come busy il worker
+            // Set the worker as busy
             this.workerNode.busy = true;
             success = true;
         }
 
-        // Invia risposta di accettazione del task
+        // Send task acceptance response
         final SubmitMapTaskResponse response = SubmitMapTaskResponse.newBuilder().setSuccess(success).build();
         responseObserver.onNext(response);
         responseObserver.onCompleted();
@@ -131,9 +133,9 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         final long startTime = System.currentTimeMillis();
         final List<PartitionInfo> partitionInfos = new ArrayList<>();
         try {
-            JMRLog.debug(LOGGER, ">>> Inizio Esecuzione MAP task: " + taskId);
+            JMRLog.info(LOGGER, ">>> Starting MAP task execution: {}", taskId);
             final Map<String, List<Serializable>> mappedData = WorkerExecutor.executeMap(request, workerNode);
-            JMRLog.debug(LOGGER, ">>> Completata Esecuzione MAP task: " + taskId);
+            JMRLog.info(LOGGER, ">>> Completed MAP task execution: {}", taskId);
 
             // Save the mapped data to local storage keeping track of partitions
             for (Map.Entry<String, List<Serializable>> entry : mappedData.entrySet()) {
@@ -143,15 +145,15 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
             }
             workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.COMPLETED);
 
-        } catch (Exception e) {
-            JMRLog.error(LOGGER, "Errore durante l'esecuzione del MAP task: " + taskId + ". " + e.getMessage());
+        } catch (JMRException e) {
+            JMRLog.error(LOGGER, "Error during MAP task execution: " + taskId, e);
             workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.FAILED);
         }
         // Set the worker as not busy
         this.workerNode.busy = false;
 
         final long executionTime = System.currentTimeMillis() - startTime;
-        JMRLog.debug(LOGGER, "<<< MAP task completato: " + taskId + " (" + executionTime + "ms)");
+        JMRLog.info(LOGGER, "<<< MAP task completed: {} ({}ms)", taskId, executionTime);
 
         // Save the task info
         final TaskResult taskResult = new TaskResult(jobId, taskId, partitionInfos, executionTime);
@@ -160,8 +162,8 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
 
     @Override
     public void submitReduceTask(SubmitReduceTaskRequest request, StreamObserver<SubmitReduceTaskResponse> responseObserver) {
-        System.out.println("\n>>> Esecuzione REDUCE task: " + request.getTaskId());
-        System.out.println("    Partition: " + request.getPartitionId());
+        JMRLog.info(LOGGER, "\n>>> Executing REDUCE task: {}", request.getTaskId());
+        JMRLog.info(LOGGER, "    Partition: {}", request.getPartitionId());
 
         String taskId = request.getTaskId();
 
@@ -169,11 +171,11 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         // try {
         // long startTime = System.currentTimeMillis();
 
-        // // Deserializza Reducer
+        // // Deserialize Reducer
         // Reducer<?, ?, ?> reducer = this.workerNode.deserialize(
         // request.getSerializedReducer().toByteArray());
 
-        // // Esegui fase Reduce
+        // // Execute Reduce phase
         // OutputDataLocation outputLocation = executeReducePhase(
         // taskId,
         // request.getPartitionId(),
@@ -190,14 +192,13 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         // .setExecutionTimeMs(executionTime)
         // .build();
 
-        // System.out.println("<<< REDUCE task completato: " + taskId +
-        // " (" + executionTime + "ms)");
+        // JMRLog.info(LOGGER, "<<< REDUCE task completed: {} ({}ms)", taskId, executionTime);
 
         // responseObserver.onNext(response);
         // responseObserver.onCompleted();
 
         // } catch (Exception e) {
-        // System.err.println("Errore REDUCE task: " + e.getMessage());
+        // JMRLog.error(LOGGER, "Error in REDUCE task", e);
         // e.printStackTrace();
 
         // ExecuteReduceTaskResponse response = ExecuteReduceTaskResponse.newBuilder()
@@ -216,24 +217,25 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
 
     @Override
     /**
-     * Recupera i dati intermedi prodotti dalla fase di Map per una specifica
-     * partizione.
+     * Retrieves the intermediate data produced by the Map phase for a specific
+     * partition.
      */
     public void fetchIntermediateData(FetchIntermediateDataRequest request, StreamObserver<IntermediateDataChunk> responseObserver) {
+        JMRLog.debug(LOGGER, "Fetching intermediate data for task {} partition {}", request.getTaskId(), request.getPartitionId());
         try {
             final List<Serializable> data = workerNode.intermediateStorage.getPartitionData(request.getTaskId(), request.getPartitionId());
 
-            // Serializza la lista in un ByteArrayOutputStream
+            // Serialize the list into a ByteArrayOutputStream
             final ByteArrayOutputStream baos = new ByteArrayOutputStream();
             try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
                 oos.writeObject(data);
                 oos.flush();
             }
 
-            // Converti in array di byte
+            // Convert to byte array
             byte[] serializedData = baos.toByteArray();
 
-            // Invia i dati in chunk
+            // Send the data in chunks
             int chunkSize = 64 * 1024; // 64KB
             int offset = 0;
 
@@ -249,14 +251,17 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
             }
 
             responseObserver.onCompleted();
+            JMRLog.debug(LOGGER, "Finished fetching intermediate data for task {} partition {}", request.getTaskId(), request.getPartitionId());
 
         } catch (IOException e) {
+            JMRLog.error(LOGGER, "Error fetching intermediate data for task {} partition {}", request.getTaskId(), request.getPartitionId(), e);
             responseObserver.onError(e);
         }
     }
 
     @Override
     public void getWorkerStatus(GetWorkerStatusRequest request, StreamObserver<GetWorkerStatusResponse> responseObserver) {
+        JMRLog.debug(LOGGER, "Received getWorkerStatus request for worker {}", request.getWorkerId());
         final WorkerStatus status = WorkerStatus.newBuilder().setActiveTasks(this.workerNode.busy ? 1 : 0).setCpuUsage(99.9).setMemoryUsage(99.9)
                 .build();
 

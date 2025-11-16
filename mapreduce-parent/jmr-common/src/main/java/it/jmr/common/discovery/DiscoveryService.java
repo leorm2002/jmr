@@ -4,7 +4,11 @@ import javax.jmdns.JmDNS;
 import javax.jmdns.ServiceEvent;
 import javax.jmdns.ServiceListener;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import it.jmr.common.utils.ExecutorManager;
+import it.jmr.common.utils.JmrUtils;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -16,6 +20,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 public class DiscoveryService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(DiscoveryService.class);
     private final String serviceType;
 
     public DiscoveryService(String serviceType) {
@@ -30,36 +35,35 @@ public class DiscoveryService {
         jmdns.addServiceListener(serviceType, new ServiceListener() {
             @Override
             public void serviceAdded(ServiceEvent event) {
+                LOGGER.debug("Service added: {}", event.getName());
                 jmdns.requestServiceInfo(serviceType, event.getName());
             }
 
             @Override
             public void serviceRemoved(ServiceEvent event) {
-                System.out.println("Servizio rimosso: " + event.getName());
+                LOGGER.info("Service removed: {}", event.getName());
             }
 
             @Override
             public void serviceResolved(ServiceEvent event) {
                 ServiceInfo info = event.getInfo();
                 found.add(info);
-                System.out.printf("Servizio risolto: %s -> %s:%d%n",
-                        info.getName(),
-                        info.getInetAddresses()[0].getHostAddress(),
-                        info.getPort());
+                LOGGER.info("Service resolved: {} -> {}:{}", info.getName(), info.getInetAddresses()[0].getHostAddress(), info.getPort());
             }
         });
 
-        System.out.printf("Discovery per %d secondi...%n", seconds);
+        LOGGER.info("Discovering for {} seconds...", seconds);
 
-        // esegui attesa su virtual thread
+        // wait on a virtual thread
         CompletableFuture<Void> waitFuture = CompletableFuture.runAsync(() -> {
-            try {Thread.sleep(seconds * 1000L); } catch (InterruptedException ignored) {}
+            JmrUtils.sleep(seconds * 1000);
+
         }, ExecutorManager.getExecutor());
 
-        waitFuture.join(); // bloccante per il chiamante
-        
+        waitFuture.join(); // blocking for the caller
+
         jmdns.close();
-        System.out.printf("Discovery terminato. Servizi trovati: %d%n", found.size());
+        LOGGER.info("Discovery finished. Found {} services.", found.size());
         return new ArrayList<>(found);
     }
 }

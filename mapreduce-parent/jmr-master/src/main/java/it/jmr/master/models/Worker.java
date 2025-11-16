@@ -68,10 +68,10 @@ public class Worker {
     }
 
     /**
-     * Controlla lo stato di salute di un servizio specifico
+     * Checks the health of a specific service
      * 
-     * @param serviceName nome del servizio (es: "mypackage.MyService")
-     * @return true se il servizio è SERVING, false altrimenti
+     * @param serviceName name of the service (e.g. "mypackage.MyService")
+     * @return true if the service is SERVING, false otherwise
      */
     private boolean isServerAlive(String serviceName) {
         try {
@@ -80,10 +80,10 @@ public class Worker {
             return response.getStatus() == HealthCheckResponse.ServingStatus.SERVING;
 
         } catch (StatusRuntimeException e) {
-            JMRLog.error(LOGGER, "Health check failed: " + e.getMessage());
+            JMRLog.error(LOGGER, "Health check failed for worker {}: {}", workerId, e.getMessage());
             return false;
         } catch (Exception e) {
-            JMRLog.error(LOGGER, "Error during health check: " + e.getMessage());
+            JMRLog.error(LOGGER, "Error during health check for worker {}: {}", workerId, e.getMessage());
             return false;
         }
     }
@@ -91,35 +91,52 @@ public class Worker {
     public <D extends Serializable, V extends Serializable, O extends Serializable> boolean submitMapTask(String jobId, String taskId, int offset,
             int limit, String jarPath, JobConfiguration<D, V, O> jobConfig) {
         try {
-
-            // 1. carica il jar sul worker
+            JMRLog.info(LOGGER, "Submitting map task {} for job {} to worker {}", taskId, jobId, workerId);
+            // 1. upload the jar to the worker
             final String jarId = JarServiceClient.uploadJar(jarPath, jarAsyncStub);
-            // 2. invia il job serializzato
+            JMRLog.debug(LOGGER, "Uploaded jar {} to worker {}", jarId, workerId);
+            // 2. send the serialized job
             JobServiceClient.uploadJob(jobConfig, jobId, jobAsyncStub);
+            JMRLog.debug(LOGGER, "Uploaded job {} to worker {}", jobId, workerId);
 
-            // 3. invia il submit
+            // 3. send the submit
             final it.jmr.grpc.worker.SubmitMapTaskRequest request = it.jmr.grpc.worker.SubmitMapTaskRequest.newBuilder().setTaskId(taskId)
                     .setJobId(jobId).setOffset(offset).setLimit(limit).setJarId(jarId).build();
             final SubmitMapTaskResponse response = stub.submitMapTask(request);
+            if(response.getSuccess()) {
+                JMRLog.info(LOGGER, "Map task {} for job {} submitted successfully to worker {}", taskId, jobId, workerId);
+            } else {
+                JMRLog.error(LOGGER, "Failed to submit map task {} for job {} to worker {}", taskId, jobId, workerId);
+            }
             return response.getSuccess();
         } catch (Exception e) {
+            JMRLog.error(LOGGER, "Error submitting map task {} for job {} to worker {}: {}", taskId, jobId, workerId, e.getMessage());
             return false;
         }
     }
 
     public Pair<WorkerTaskStatus, List<IntermediateLocation>> getMapTaskStatus(String jobId, String taskId) {
-        final GetMapTaskStatusRequest request = GetMapTaskStatusRequest.newBuilder().setJobId(jobId).setTaskId(taskId).build();
-        final GetMapTaskStatusResponse response = stub.getMapTaskStatus(request);
+        try {
+            JMRLog.debug(LOGGER, "Getting status for map task {} of job {} from worker {}", taskId, jobId, workerId);
+            final GetMapTaskStatusRequest request = GetMapTaskStatusRequest.newBuilder().setJobId(jobId).setTaskId(taskId).build();
+            final GetMapTaskStatusResponse response = stub.getMapTaskStatus(request);
 
-        switch (response.getState()) {
-        case TASK_RUNNING:
-            return Pair.of(WorkerTaskStatus.RUNNING, Collections.emptyList());
-        case TASK_COMPLETED:
-            return Pair.of(WorkerTaskStatus.COMPLETED, response.getLocationsList().stream()
-                    .map(loc -> new IntermediateLocation(loc.getWorkerId(), loc.getTaskId(), loc.getPartitionId())).toList());
-        case TASK_MISSING:
-            return Pair.of(WorkerTaskStatus.MISSING, Collections.emptyList());
-        default:
+            switch (response.getState()) {
+            case TASK_RUNNING:
+                return Pair.of(WorkerTaskStatus.RUNNING, Collections.emptyList());
+            case TASK_COMPLETED:
+                JMRLog.debug(LOGGER, "Map task {} of job {} completed on worker {}", taskId, jobId, workerId);
+                return Pair.of(WorkerTaskStatus.COMPLETED, response.getLocationsList().stream()
+                        .map(loc -> new IntermediateLocation(loc.getWorkerId(), loc.getTaskId(), loc.getPartitionId())).toList());
+            case TASK_MISSING:
+                JMRLog.warn(LOGGER, "Map task {} of job {} is missing on worker {}", taskId, jobId, workerId);
+                return Pair.of(WorkerTaskStatus.MISSING, Collections.emptyList());
+            default:
+                JMRLog.error(LOGGER, "Map task {} of job {} on worker {} has failed", taskId, jobId, workerId);
+                return Pair.of(WorkerTaskStatus.FAILED, Collections.emptyList());
+            }
+        } catch (Exception e) {
+            JMRLog.error(LOGGER, "Error getting status for map task {} of job {} from worker {}: {}", taskId, jobId, workerId, e.getMessage());
             return Pair.of(WorkerTaskStatus.FAILED, Collections.emptyList());
         }
     }

@@ -6,13 +6,14 @@ import java.util.List;
 
 import it.jmr.client.JMRClient;
 import it.jmr.client.Job;
+import it.jmr.common.exceptions.JMRException;
 import it.jmr.common.models.JobConfiguration;
 import it.jmr.common.utils.Pair;
 import it.jmr.grpcdataprovider.localgrpc.LocalGrpcDataProvider;
 
 public class MyWcJob {
 
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) throws InterruptedException, JMRException {
 
         if (args.length != 4) {
             System.err.println("Usage: MyWcJob <books-data-path> <jar-path> <host> <port>");
@@ -64,12 +65,14 @@ public class MyWcJob {
         jmrClient.submit(jarPath, job);
 
         while (true) {
-            jmrClient.getJobStatus();
+            final String status = jmrClient.getJobStatus();
+            System.out.println("Job status: " + status);
             Thread.sleep(1000); // Attendi 1 secondo prima di controllare di nuovo
-        }
 
-        // Attendo la terminazione del server gRPC locale
-        // dataProviderServer.blockUntilShutdown();
+            if ("COMPLETED".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status)) {
+                break;
+            }
+        }
     }
 
 }

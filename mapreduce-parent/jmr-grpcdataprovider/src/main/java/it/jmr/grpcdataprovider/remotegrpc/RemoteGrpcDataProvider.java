@@ -3,6 +3,7 @@ package it.jmr.grpcdataprovider.remotegrpc;
 import java.io.IOException;
 import java.io.Serializable;
 
+import it.jmr.common.exceptions.JMRException;
 import it.jmr.common.providers.DataProvider;
 import it.jmr.common.providers.DataProviderClient;
 
@@ -47,9 +48,9 @@ public class RemoteGrpcDataProvider<D extends Serializable> implements DataProvi
     }
 
     @Override
-    public DataProviderClient<D> getClient() {
+    public DataProviderClient<D> getClient() throws JMRException {
         if (!initialized) {
-            throw new IllegalStateException("Provider not initialized. Call init() first.");
+            throw new JMRException("Provider not initialized. Call init() first.");
         }
 
         // Crea un client che punta direttamente al server esterno
@@ -57,7 +58,7 @@ public class RemoteGrpcDataProvider<D extends Serializable> implements DataProvi
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() throws JMRException {
         // Non c'è nessun server locale da chiudere
         initialized = false;
         System.out.println("RemoteGrpcDataProvider closed");

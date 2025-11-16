@@ -1,5 +1,6 @@
 package com.example;
 
+import it.jmr.common.exceptions.JMRException;
 import it.jmr.grpcdataprovider.Container;
 import it.jmr.grpcdataprovider.DataProviderUtils;
 
@@ -26,7 +27,7 @@ public class PreparaDati {
                 try {
                     DataProviderUtils.serialize(java.nio.file.Paths.get(outName), book.data);
                     System.out.println("Serializzato libro in: " + outName);
-                } catch (java.io.IOException e) {
+                } catch (JMRException e) {
                     System.err.println("Errore serializzando il libro in " + outName + ": " + e.getMessage());
                 }
             }

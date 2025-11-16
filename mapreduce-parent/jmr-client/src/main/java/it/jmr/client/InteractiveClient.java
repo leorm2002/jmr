@@ -1,15 +1,20 @@
 package it.jmr.client;
+
 import java.util.Scanner;
-// Assumendo che il resto della classe MapReduceClient esista...
-// public class MapReduceClient { ... }
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import it.jmr.common.exceptions.JMRException;
 
 public class InteractiveClient {
 
-    // Spostiamo la logica di gestione dei comandi in un metodo separato
+    private static final Logger LOGGER = LoggerFactory.getLogger(InteractiveClient.class);
+
     private static void handleCommand(String line, MapReduceClient client) {
         String[] parts = line.trim().split("\\s+");
         if (parts.length == 0 || parts[0].isEmpty()) {
-            return; // Riga vuota
+            return;
         }
 
         String command = parts[0].toLowerCase();
@@ -18,19 +23,19 @@ public class InteractiveClient {
             switch (command) {
                 case "submit":
                     if (parts.length < 3) {
-                        System.err.println("Uso: submit <jar-path> <main-class> [job-args...]");
+                        LOGGER.error("Usage: submit <jar-path> <main-class> [job-args...]");
                         break;
                     }
                     String jarPath = parts[1];
                     String mainClass = parts[2];
                     String jarId = client.uploadJar(jarPath);
-                    String jobId = client.submitJob(jarId, mainClass); // Modifica qui se devi passare 'parts'
-                    System.out.println("\n✓ Job sottomesso: " + jobId);
+                    String jobId = client.submitJob(jarId, mainClass);
+                    LOGGER.info("\n✓ Job submitted: " + jobId);
                     break;
 
                 case "status":
                     if (parts.length < 2) {
-                        System.err.println("Uso: status <job-id>");
+                        LOGGER.error("Usage: status <job-id>");
                         break;
                     }
                     client.getJobStatus(parts[1]);
@@ -44,81 +49,54 @@ public class InteractiveClient {
                     break;
 
                 default:
-                    System.err.println("Comando sconosciuto: " + command);
+                    LOGGER.error("Unknown command: " + command);
                     printHelp();
                     break;
             }
-        } catch (Exception e) {
-            // Gestisce errori *del comando* senza terminare il client
-            System.err.println("Errore durante l'esecuzione del comando: " + e.getMessage());
-            e.printStackTrace();
+        } catch (JMRException e) {
+            LOGGER.error("Error executing command: " + e.getMessage(), e);
         }
     }
 
-    // Un metodo helper per stampare l'aiuto
     private static void printHelp() {
-        System.out.println();
-        System.out.println("Comandi disponibili:");
-        System.out.println("  submit <jar-path> <main-class> [job-args...]  - Sottomette un job");
-        System.out.println("  status <job-id>                               - Ottiene lo stato di un job");
-        System.out.println("  list                                          - Lista tutti i job");
-        System.out.println("  monitor <job-id>                              - Monitora un job in tempo reale");
-        System.out.println("  help                                          - Mostra questo aiuto");
-        System.out.println("  exit | quit                                   - Esce dal client");
-        System.out.println();
+        LOGGER.info("\nAvailable commands:\n" +
+                "  submit <jar-path> <main-class> [job-args...]  - Submits a job\n" +
+                "  status <job-id>                               - Gets the status of a job\n" +
+                "  list                                          - Lists all jobs\n" +
+                "  monitor <job-id>                              - Monitors a job in real time\n" +
+                "  help                                          - Shows this help\n" +
+                "  exit | quit                                   - Exits the client\n");
     }
 
-    // Il nuovo metodo main
     public static void main(String[] args) {
-        // 1. Controlla gli argomenti di avvio (solo host e porta)
         if (args.length != 2) {
-            System.out.println("Uso: java -jar mapreduce-client.jar <master-host> <master-port>");
-            System.out.println();
-            System.out.println("Dopo l'avvio, usare 'help' per la lista dei comandi interattivi.");
+            LOGGER.error("Usage: java -jar mapreduce-client.jar <master-host> <master-port>");
+            LOGGER.error("After startup, use 'help' for the list of interactive commands.");
             return;
         }
 
         String host = args[0];
         int port = Integer.parseInt(args[1]);
 
-        MapReduceClient client = null;
-        Scanner scanner = new Scanner(System.in);
+        try (Scanner scanner = new Scanner(System.in)) {
+            try (MapReduceClient client = new MapReduceClient(host, port)) {
+                LOGGER.info("Connected to {}:{}. Type 'help' for commands or 'exit' to quit.", host, port);
 
-        try {
-            // 2. Inizializza il client UNA SOLA VOLTA
-            client = new MapReduceClient(host, port);
-            System.out.println("Connesso a " + host + ":" + port + ". Digita 'help' per i comandi o 'exit' per uscire.");
+                while (true) {
+                    System.out.print("mapreduce-client> ");
+                    String line = scanner.nextLine();
 
-            // 3. Avvia il ciclo REPL (Read-Eval-Print Loop)
-            while (true) {
-                System.out.print("mapreduce-client> ");
-                String line = scanner.nextLine();
+                    if ("exit".equalsIgnoreCase(line) || "quit".equalsIgnoreCase(line)) {
+                        break;
+                    }
 
-                // Controlla il comando di uscita
-                if (line.equalsIgnoreCase("exit") || line.equalsIgnoreCase("quit")) {
-                    break; // Esce dal ciclo while
+                    handleCommand(line, client);
                 }
 
-                // Gestisce il comando
-                handleCommand(line, client);
+            } catch (Exception e) {
+                LOGGER.error("Critical client error: " + e.getMessage(), e);
             }
-
-        } catch (Exception e) {
-            // Errore critico (es. connessione fallita all'inizio)
-            System.err.println("Errore critico del client: " + e.getMessage());
-            e.printStackTrace();
-        } finally {
-            // 4. Esegue lo shutdown UNA SOLA VOLTA all'uscita
-            System.out.println("Disconnessione in corso...");
-            if (client != null) {
-                try {
-                    client.shutdown();
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-            scanner.close();
-            System.out.println("Client terminato.");
         }
+        LOGGER.info("Client terminated.");
     }
 }

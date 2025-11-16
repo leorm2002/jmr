@@ -1,6 +1,5 @@
 package com.example;
 
-import java.io.IOException;
 import java.util.List;
 
 import it.jmr.common.providers.DataProviderClient;
@@ -11,16 +10,16 @@ final class DataProviderClientImplementation implements DataProviderClient<Strin
     }
 
     @Override
-    public long size() throws IOException {
+    public long size() {
         return 6;
     }
 
     @Override
-    public List<String> fetchChunk(long offset, long limit) throws IOException {
+    public List<String> fetchChunk(long offset, long limit) {
         return List.of("Alice", "Alice", "Alice", "Bob", "Bob", "Charlie");
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() {
     }
 }
