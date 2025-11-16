@@ -55,40 +55,29 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
     }
 
     @Override
-    public void getMapTaskStatus(GetMapTaskStatusRequest request,
-            StreamObserver<GetMapTaskStatusResponse> responseObserver) {
+    public void getMapTaskStatus(GetMapTaskStatusRequest request, StreamObserver<GetMapTaskStatusResponse> responseObserver) {
 
         final String jobId = request.getJobId();
         final String taskId = request.getTaskId();
 
-        final WorkerTaskStatus status = workerNode.statusMap.getOrDefault(Pair.of(jobId, taskId),
-                WorkerTaskStatus.MISSING);
+        final WorkerTaskStatus status = workerNode.statusMap.getOrDefault(Pair.of(jobId, taskId), WorkerTaskStatus.MISSING);
 
         if (status == WorkerTaskStatus.MISSING) {
-            responseObserver.onNext(
-                    GetMapTaskStatusResponse.newBuilder()
-                            .setState(TaskState.TASK_MISSING)
-                            .build());
+            responseObserver.onNext(GetMapTaskStatusResponse.newBuilder().setState(TaskState.TASK_MISSING).build());
             responseObserver.onCompleted();
             JMRLog.debug(LOGGER, "    Task MAP mancante: " + taskId + " per job: " + jobId);
             return;
         }
 
         if (status == WorkerTaskStatus.RUNNING) {
-            responseObserver.onNext(
-                    GetMapTaskStatusResponse.newBuilder()
-                            .setState(TaskState.TASK_RUNNING)
-                            .build());
+            responseObserver.onNext(GetMapTaskStatusResponse.newBuilder().setState(TaskState.TASK_RUNNING).build());
             responseObserver.onCompleted();
             JMRLog.debug(LOGGER, "    Task MAP in esecuzione: " + taskId + " per job: " + jobId);
             return;
         }
 
         if (status == WorkerTaskStatus.FAILED) {
-            responseObserver.onNext(
-                    GetMapTaskStatusResponse.newBuilder()
-                            .setState(TaskState.TASK_FAILED)
-                            .build());
+            responseObserver.onNext(GetMapTaskStatusResponse.newBuilder().setState(TaskState.TASK_FAILED).build());
             responseObserver.onCompleted();
             JMRLog.debug(LOGGER, "    Task MAP fallito: " + taskId + " per job: " + jobId);
             return;
@@ -98,18 +87,13 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         final List<PartitionInfo> partitions = taskResult.getPartitions();
         final List<IntermediateDataLocation> locations = new LinkedList<>();
         for (final PartitionInfo partitionInfo : partitions) {
-            final IntermediateDataLocation loc = IntermediateDataLocation.newBuilder()
-                    .setWorkerId(workerNode.workerId)
+            final IntermediateDataLocation loc = IntermediateDataLocation.newBuilder().setWorkerId(workerNode.workerId)
                     .setTaskId(partitionInfo.getPartitionId()).setPartitionId(partitionInfo.getKey()).build();
             locations.add(loc);
         }
         JMRLog.debug(LOGGER, "    Task MAP completato: " + taskId + " per job: " + jobId);
 
-        responseObserver.onNext(
-                GetMapTaskStatusResponse.newBuilder()
-                        .addAllLocations(locations)
-                        .setState(TaskState.TASK_COMPLETED)
-                        .build());
+        responseObserver.onNext(GetMapTaskStatusResponse.newBuilder().addAllLocations(locations).setState(TaskState.TASK_COMPLETED).build());
         responseObserver.onCompleted();
 
     }
@@ -148,7 +132,7 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         final List<PartitionInfo> partitionInfos = new ArrayList<>();
         try {
             JMRLog.debug(LOGGER, ">>> Inizio Esecuzione MAP task: " + taskId);
-            final Map<String, List<Serializable>> mappedData = WorkerExecutor.executeMap(request);
+            final Map<String, List<Serializable>> mappedData = WorkerExecutor.executeMap(request, workerNode);
             JMRLog.debug(LOGGER, ">>> Completata Esecuzione MAP task: " + taskId);
 
             // Save the mapped data to local storage keeping track of partitions
@@ -175,8 +159,7 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
     }
 
     @Override
-    public void submitReduceTask(SubmitReduceTaskRequest request,
-            StreamObserver<SubmitReduceTaskResponse> responseObserver) {
+    public void submitReduceTask(SubmitReduceTaskRequest request, StreamObserver<SubmitReduceTaskResponse> responseObserver) {
         System.out.println("\n>>> Esecuzione REDUCE task: " + request.getTaskId());
         System.out.println("    Partition: " + request.getPartitionId());
 
@@ -236,11 +219,9 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
      * Recupera i dati intermedi prodotti dalla fase di Map per una specifica
      * partizione.
      */
-    public void fetchIntermediateData(FetchIntermediateDataRequest request,
-            StreamObserver<IntermediateDataChunk> responseObserver) {
+    public void fetchIntermediateData(FetchIntermediateDataRequest request, StreamObserver<IntermediateDataChunk> responseObserver) {
         try {
-            final List<Serializable> data = workerNode.intermediateStorage
-                    .getPartitionData(request.getTaskId(), request.getPartitionId());
+            final List<Serializable> data = workerNode.intermediateStorage.getPartitionData(request.getTaskId(), request.getPartitionId());
 
             // Serializza la lista in un ByteArrayOutputStream
             final ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -261,8 +242,7 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
                 final boolean isLast = (offset + length >= serializedData.length);
 
                 final IntermediateDataChunk chunk = IntermediateDataChunk.newBuilder()
-                        .setData(com.google.protobuf.ByteString.copyFrom(serializedData, offset, length))
-                        .setIsLast(isLast).build();
+                        .setData(com.google.protobuf.ByteString.copyFrom(serializedData, offset, length)).setIsLast(isLast).build();
 
                 responseObserver.onNext(chunk);
                 offset += length;
@@ -276,19 +256,12 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
     }
 
     @Override
-    public void getWorkerStatus(GetWorkerStatusRequest request,
-            StreamObserver<GetWorkerStatusResponse> responseObserver) {
-        final WorkerStatus status = WorkerStatus.newBuilder()
-                .setActiveTasks(this.workerNode.busy ? 1 : 0)
-                .setCpuUsage(99.9)
-                .setMemoryUsage(99.9)
+    public void getWorkerStatus(GetWorkerStatusRequest request, StreamObserver<GetWorkerStatusResponse> responseObserver) {
+        final WorkerStatus status = WorkerStatus.newBuilder().setActiveTasks(this.workerNode.busy ? 1 : 0).setCpuUsage(99.9).setMemoryUsage(99.9)
                 .build();
 
-        final GetWorkerStatusResponse response = GetWorkerStatusResponse.newBuilder()
-                .setWorkerId(this.workerNode.workerId)
-                .setState(this.workerNode.busy ? WorkerState.BUSY : WorkerState.IDLE)
-                .setCurrentStatus(status)
-                .build();
+        final GetWorkerStatusResponse response = GetWorkerStatusResponse.newBuilder().setWorkerId(this.workerNode.workerId)
+                .setState(this.workerNode.busy ? WorkerState.BUSY : WorkerState.IDLE).setCurrentStatus(status).build();
 
         responseObserver.onNext(response);
         responseObserver.onCompleted();

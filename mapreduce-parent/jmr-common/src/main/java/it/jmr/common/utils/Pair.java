@@ -1,6 +1,7 @@
 package it.jmr.common.utils;
 
-public class Pair<K, V> {
+public class Pair<K, V> implements java.io.Serializable {
+    private static final long serialVersionUID = 1L;
     public final K first;
     public final V second;
 
@@ -17,8 +18,8 @@ public class Pair<K, V> {
         return second;
     }
 
-    public static <K,V> Pair<K,V> of(K k, V v){
-        return new Pair<>(k,v);
+    public static <K, V> Pair<K, V> of(K k, V v) {
+        return new Pair<>(k, v);
     }
 
     @Override

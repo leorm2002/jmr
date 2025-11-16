@@ -25,7 +25,7 @@ service MapReduceService {
 // Richiesta per sottomettere un job
 message SubmitJobRequest {
   string jar_id = 1;           // ID del JAR precedentemente caricato
-  string main_class = 2;       // Classe principale da eseguire
+  string job_id = 2;            // Il job da deserializzare
 }
 
 // Risposta alla sottomissione del job

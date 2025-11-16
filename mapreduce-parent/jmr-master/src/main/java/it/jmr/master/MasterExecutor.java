@@ -87,16 +87,24 @@ public class MasterExecutor implements Runnable {
 
         // 1st step: load the job configuration
         final String jobJarPath = jobInfo.getJarPath();
+        final String jobSerializedPath = jobInfo.getJobPath();
+
         final JobConfiguration<D, V, O> jobConfig;
 
         try {
-            jobConfig = new JobClassLoader(jobJarPath, "job.ser").deserializeFromFile();
+            jobConfig = new JobClassLoader(jobJarPath, jobSerializedPath).deserializeFromFile();
         } catch (Exception e) {
             jobInfo.setStatus(JobStatus.FAILED);
             jobInfo.setErrorMessage(e.getMessage());
             JMRLog.error(LOGGER, "<<< Job failder: {}", jobInfo.getJobId());
             JMRLog.error(LOGGER, "Error: {}", e.getMessage());
+            JMRLog.error(LOGGER, "Error: {}", e.toString());
+            JMRLog.error(LOGGER, "StackTrace: {}", (e.getCause() != null ? e.getCause().getStackTrace() : e.getStackTrace()));
+
+            JMRLog.error(LOGGER, "Errore completo di deserializzazione:", e);
+
             throw new RuntimeException("Error loading job configuration: " + e.getMessage(), e);
+
         }
 
         // 2nd step: fetch data size
@@ -136,7 +144,7 @@ public class MasterExecutor implements Runnable {
 
         // Submit task assigner
         final var assignerFuture = ExecutorManager.getExecutor()
-                .submit(() -> submitUnassignedTasks(workers, assignedTasks, unassignedQueue, stopForError));
+                .submit(() -> submitUnassignedTasks(workers, assignedTasks, unassignedQueue, stopForError, jobConfig));
 
         // Submit task monitor
         final var monitorFuture = ExecutorManager.getExecutor()
@@ -213,7 +221,7 @@ public class MasterExecutor implements Runnable {
             assignedTasks.removeAll(toRemove);
 
             try {
-                Thread.sleep(100);
+                Thread.sleep(2000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 stopForError.set(true);
@@ -222,8 +230,9 @@ public class MasterExecutor implements Runnable {
         }
     }
 
-    private static void submitUnassignedTasks(List<Worker> workers, final List<AssignedMapTasks> assignedTasks,
-            final Queue<UnassignedMapTasks> unassignedQueue, final AtomicBoolean stopForError) {
+    private static <D extends Serializable, V extends Serializable, O extends Serializable> void submitUnassignedTasks(List<Worker> workers,
+            final List<AssignedMapTasks> assignedTasks, final Queue<UnassignedMapTasks> unassignedQueue, final AtomicBoolean stopForError,
+            JobConfiguration<D, V, O> jobConfig) {
         // Continua finché ci sono task da assegnare o task in esecuzione e non è stato
         // segnalato un errore
         while (!(unassignedQueue.isEmpty() && assignedTasks.isEmpty()) && !stopForError.get()) {
@@ -234,7 +243,7 @@ public class MasterExecutor implements Runnable {
             JMRLog.debug(LOGGER, "Avvio processo di assegnazione task {}", task.taskId());
 
             // Prova ad assegnare il task, può non riuscirci se tutti i worker sono occupati
-            final Optional<AssignedMapTasks> assigned = tryAssignMapTask(task, workers, assignedTasks);
+            final Optional<AssignedMapTasks> assigned = tryAssignMapTask(task, workers, assignedTasks, jobConfig);
 
             if (assigned.isPresent()) {
                 JMRLog.debug(LOGGER, "Task {} assegnato con successo a {}", task.taskId(),
@@ -249,7 +258,7 @@ public class MasterExecutor implements Runnable {
 
                 // Attendi un po' prima di riprovare
                 try {
-                    Thread.sleep(1000);
+                    Thread.sleep(2000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     stopForError.set(true);
@@ -274,14 +283,15 @@ public class MasterExecutor implements Runnable {
     /**
      * Attempt to assign a map task to an available worker
      */
-    static Optional<AssignedMapTasks> tryAssignMapTask(UnassignedMapTasks task, List<Worker> workers, List<AssignedMapTasks> assignedTasks) {
+    static <D extends Serializable, V extends Serializable, O extends Serializable> Optional<AssignedMapTasks> tryAssignMapTask(
+            UnassignedMapTasks task, List<Worker> workers, List<AssignedMapTasks> assignedTasks, JobConfiguration<D, V, O> jobConfig) {
         final Set<Worker> busy = assignedTasks.stream().map(AssignedMapTasks::worker).collect(Collectors.toSet());
         for (final Worker worker : workers) {
             if (busy.contains(worker)) {
                 continue;
             }
 
-            final Optional<AssignedMapTasks> result = tryAssignMapTask(task, worker);
+            final Optional<AssignedMapTasks> result = tryAssignMapTask(task, worker, jobConfig);
             if (result.isPresent()) {
                 return result;
             }
@@ -289,9 +299,10 @@ public class MasterExecutor implements Runnable {
         return Optional.empty();
     }
 
-    static Optional<AssignedMapTasks> tryAssignMapTask(UnassignedMapTasks task, Worker worker) {
+    static <D extends Serializable, V extends Serializable, O extends Serializable> Optional<AssignedMapTasks> tryAssignMapTask(
+            UnassignedMapTasks task, Worker worker, JobConfiguration<D, V, O> jobConfig) {
         final boolean assigned = worker.submitMapTask(task.jobId(), task.taskId(), task.chunks().getFirst().intValue(),
-                (int) (task.chunks().getSecond() - task.chunks().getFirst()), task.jarId());
+                (int) (task.chunks().getSecond() - task.chunks().getFirst()), task.jarId(), jobConfig);
         if (assigned) {
             return Optional.of(task.toAssigned(worker));
         }

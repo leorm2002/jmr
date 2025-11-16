@@ -1,23 +1,49 @@
 package it.jmr.master.models;
+
 import it.jmr.grpc.JobInfo;
 import it.jmr.grpc.JobStatus;
 
 public class JobInfoInternal {
     private final String jobId;
-    private final String mainClass;
-    private final String jarPath;
+    private final long submissionTime;
+
+    private String jobPath;
+    private String jarPath;
     private JobStatus status;
     private String errorMessage = "";
-    private final long submissionTime;
     private long startTime;
     private long endTime;
 
-    public JobInfoInternal(String jobId, String mainClass, String jarPath) {
+    public String getJobPath() {
+        return jobPath;
+    }
+
+    public static JobInfoInternal recievedJob(String jobId) {
+        return new JobInfoInternal(jobId);
+    }
+
+    public void recievedJarFound(String jarPth) {
+        this.jarPath = jarPth;
+    }
+
+    public void recievedJarNotFound() {
+        this.errorMessage = "JAR not found.";
+        this.status = JobStatus.FAILED;
+    }
+
+    public void recievedSerializedJobNotFound() {
+        this.errorMessage = "Serialized job file not found.";
+        this.status = JobStatus.FAILED;
+    }
+
+    public void recievedSerializedJobFound(String jobPth) {
+        this.jobPath = jobPth;
+    }
+
+    private JobInfoInternal(String jobId) {
         this.jobId = jobId;
-        this.mainClass = mainClass;
-        this.jarPath = jarPath;
-        this.status = JobStatus.PENDING;
         this.submissionTime = System.currentTimeMillis();
+        this.status = JobStatus.PENDING;
     }
 
     public void setStatus(JobStatus status) {
@@ -33,16 +59,9 @@ public class JobInfoInternal {
         this.errorMessage = errorMessage;
     }
 
-
     public JobInfo toProto() {
-        JobInfo.Builder builder = JobInfo.newBuilder()
-                .setJobId(jobId)
-                .setMainClass(mainClass)
-                .setStatus(status)
-                .setSubmissionTime(submissionTime)
-                .setStartTime(startTime)
-                .setEndTime(endTime)
-                .setErrorMessage(errorMessage);
+        JobInfo.Builder builder = JobInfo.newBuilder().setJobId(jobId).setStatus(status).setSubmissionTime(submissionTime).setStartTime(startTime)
+                .setEndTime(endTime).setErrorMessage(errorMessage);
 
         return builder.build();
     }
@@ -59,10 +78,6 @@ public class JobInfoInternal {
         return jobId;
     }
 
-    public String getMainClass() {
-        return mainClass;
-    }
-
     public String getJarPath() {
         return jarPath;
     }
@@ -73,6 +88,6 @@ public class JobInfoInternal {
 
     @Override
     public String toString() {
-        return "JobInfoInternal [jobId=" + jobId + ", mainClass=" + mainClass + ", jarPath=" + jarPath + "]";
+        return "JobInfoInternal [jobId=" + jobId + ", jarPath=" + jarPath + "]";
     }
 }

@@ -17,6 +17,7 @@ import io.grpc.health.v1.HealthCheckResponse;
 import io.grpc.protobuf.services.HealthStatusManager;
 import it.jmr.common.JMRConstants;
 import it.jmr.common.jarservice.JarServiceImpl;
+import it.jmr.common.jarservice.JobServiceImpl;
 import it.jmr.common.utils.JMRLog;
 import it.jmr.common.utils.Pair;
 import it.jmr.worker.models.WorkerContext;
@@ -27,23 +28,27 @@ public class WorkerServer {
     private final int port;
     private final Server server;
     final String storageDir;
-    final WorkerContext workerNode;
+    final WorkerContext ctx;
     private HealthStatusManager healthStatusManager;
 
-    public WorkerServer(String workerId, int port, String storageDir) {
+    public WorkerServer(String workerId, int port, String jarStorageDir, String jobStorageDir) {
         this.port = port;
-        this.storageDir = storageDir;
-        this.workerNode = new WorkerContext(new InMemoryIntermediateStorage(), workerId);
+        this.storageDir = jarStorageDir;
+        this.ctx = new WorkerContext(new InMemoryIntermediateStorage(), workerId);
         this.healthStatusManager = new HealthStatusManager();
 
         // Crea directory di storage
-        new File(storageDir).mkdirs();
+        new File(jarStorageDir).mkdirs();
 
-        this.server = ServerBuilder.forPort(port).addService(new WorkerServiceImpl(workerNode))
-                .addService(new JarServiceImpl(storageDir, workerNode.jarStorage)).addService(healthStatusManager.getHealthService()) // Aggiungi
-                                                                                                                                      // health
-                                                                                                                                      // service
-                .maxInboundMessageSize(100 * 1024 * 1024).build();
+        // Crea directory di storage per i job
+        new File(jobStorageDir).mkdirs();
+
+        this.server = ServerBuilder.forPort(port)//
+                .addService(new WorkerServiceImpl(ctx))//
+                .addService(new JarServiceImpl(jarStorageDir, ctx.jarStorage))//
+                .addService(new JobServiceImpl(jobStorageDir, ctx.jobStorage))//
+                .addService(healthStatusManager.getHealthService()) // Aggiungi health service
+                .maxInboundMessageSize(JMRConstants.MAX_INBOUND_MESSAGE_SIZE).build();
 
         // Imposta lo stato di salute
         healthStatusManager.setStatus(JMRConstants.HEALTH_SERVICE_NAME, HealthCheckResponse.ServingStatus.SERVING);
@@ -54,7 +59,7 @@ public class WorkerServer {
         System.out.println("╔════════════════════════════════════════╗");
         System.out.println("║            jMR   Worker Node           ║");
         System.out.println("╚════════════════════════════════════════╝");
-        System.out.println("Worker ID:    " + workerNode.workerId);
+        System.out.println("Worker ID:    " + ctx.workerId);
         System.out.println("Porta:        " + port);
         System.out.println("Storage:      " + new File(storageDir).getAbsolutePath());
         System.out.println("\nWorker pronto per ricevere task...\n");
@@ -84,7 +89,7 @@ public class WorkerServer {
             String host, int port, String taskId, int partitionId) throws Exception {
 
         // Se è questo worker, leggi direttamente dal disco
-        if (workerId.equals(this.workerNode.workerId)) {
+        if (workerId.equals(this.ctx.workerId)) {
             String filePath = storageDir + "/map_" + taskId + "_part_" + partitionId + ".dat";
             try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(filePath))) {
                 return (List<Pair<KEY, VALUE>>) ois.readObject();

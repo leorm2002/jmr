@@ -67,11 +67,8 @@ public class JarServiceImpl extends JarServiceGrpc.JarServiceImplBase {
                     jarStorage.put(jarId, jarPath);
                     System.out.println("JAR caricato: " + jarPath + " (ID: " + jarId + ")");
 
-                    UploadJarResponse response = UploadJarResponse.newBuilder()
-                            .setSuccess(true)
-                            .setJarId(jarId)
-                            .setMessage("JAR caricato con successo")
-                            .build();
+                    UploadJarResponse response = UploadJarResponse.newBuilder().setSuccess(true).setJarId(jarId)
+                            .setMessage("JAR caricato con successo").build();
 
                     responseObserver.onNext(response);
                     responseObserver.onCompleted();

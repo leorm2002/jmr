@@ -4,10 +4,12 @@ import java.io.Serializable;
 
 import it.jmr.common.providers.DataProviderClient;
 
-public abstract class JobConfiguration<D extends Serializable, V extends Serializable, O extends Serializable> implements Serializable {
-    public abstract DataProviderClient<D> getDataProvider();
+public interface JobConfiguration<D extends Serializable, V extends Serializable, O extends Serializable> extends Serializable {
+    static final long serialVersionUID = 1L;
 
-    public abstract SerializableMapper<D, V> getMapper();
+    public DataProviderClient<D> getDataProvider();
 
-    public abstract SerializableReducer<V, O> getReducer();
+    public SerializableMapper<D, V> getMapper();
+
+    public SerializableReducer<V, O> getReducer();
 }

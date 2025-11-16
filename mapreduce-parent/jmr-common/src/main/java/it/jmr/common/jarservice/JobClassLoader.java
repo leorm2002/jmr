@@ -1,6 +1,7 @@
 package it.jmr.common.jarservice;
 
 import java.io.*;
+import java.lang.reflect.InvocationTargetException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
@@ -8,13 +9,14 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import it.jmr.common.models.JobConfiguration;
+import it.jmr.common.utils.JMRLog;
 
 /**
  * ClassLoader personalizzato per caricare job da JAR con supporto per
  * deserializzazione
  */
 public class JobClassLoader extends URLClassLoader {
-
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(JobClassLoader.class);
     private final String jarPath;
     private final String filePath;
 
@@ -26,8 +28,7 @@ public class JobClassLoader extends URLClassLoader {
      * @throws Exception Se il JAR non esiste o non può essere caricato
      */
     public JobClassLoader(String jarPath, String filePath) throws Exception {
-        super(new URL[] { new File(jarPath).toURI().toURL() },
-                JobClassLoader.class.getClassLoader());
+        super(new URL[] { new File(jarPath).toURI().toURL() }, JobClassLoader.class.getClassLoader());
 
         this.jarPath = jarPath;
         this.filePath = filePath;
@@ -54,10 +55,10 @@ public class JobClassLoader extends URLClassLoader {
     public Class<?> loadClass(String name) throws ClassNotFoundException {
         // Prima prova a caricare dal JAR
         try {
-            return findClass(name);
+            return super.loadClass(name);
         } catch (ClassNotFoundException e) {
             // Se non trovata nel JAR, delega al parent classloader
-            return super.loadClass(name);
+            return findClass(name);
         }
     }
 
@@ -70,15 +71,18 @@ public class JobClassLoader extends URLClassLoader {
      *                                JobConfiguration
      */
     @SuppressWarnings("unchecked")
-    public <D extends Serializable, V extends Serializable, O extends Serializable> Class<? extends JobConfiguration<D, V, O>> loadJob(
-            String name)
+    public <D extends Serializable, V extends Serializable, O extends Serializable> Class<? extends JobConfiguration<D, V, O>> loadJob(String name)
             throws ClassNotFoundException {
+        Class<?> clazz;
+        try {
 
-        Class<?> clazz = loadClass(name);
+            clazz = loadClass(name);
+        } catch (ReflectiveOperationException e) {
+            throw new ClassNotFoundException("Errore durante il caricamento della classe: " + name, e);
+        }
 
         if (!JobConfiguration.class.isAssignableFrom(clazz)) {
-            throw new ClassNotFoundException(
-                    name + " non estende JobConfiguration");
+            throw new ClassNotFoundException(name + " non estende JobConfiguration");
         }
 
         return (Class<? extends JobConfiguration<D, V, O>>) clazz;
@@ -107,12 +111,35 @@ public class JobClassLoader extends URLClassLoader {
     @SuppressWarnings("unchecked")
     public <T> T deserializeFromFile() throws Exception {
         if (filePath == null) {
-            throw new IllegalStateException(
-                    "Nessun file specificato nel costruttore");
+            throw new IllegalStateException("Nessun file specificato nel costruttore");
         }
+        T deserialize;
+        try {
 
-        byte[] data = Files.readAllBytes(Paths.get(filePath));
-        return deserialize(data);
+            byte[] data = Files.readAllBytes(Paths.get(filePath));
+            deserialize = deserialize(data);
+
+        } catch (InvalidObjectException e) {
+            JMRLog.error(LOGGER, "Errore di deserializzazione: classe non trovata {}", e);
+
+            // Stack trace completo
+            StringWriter sw = new StringWriter();
+            e.printStackTrace(new PrintWriter(sw));
+            JMRLog.error(LOGGER, "Stack trace:\n{}", sw.toString());
+
+            // Cerca ClassNotFoundException nella catena
+            Throwable current = e;
+            while (current != null) {
+                JMRLog.error(LOGGER, "❌ {}", current.getMessage());
+                current = current.getCause();
+            }
+
+            throw e;
+        } catch (Exception e) {
+            JMRLog.error(LOGGER, "Errore durante la deserializzazione {}", e);
+            throw new RuntimeException(e);
+        }
+        return deserialize;
     }
 
     /**
@@ -132,8 +159,7 @@ public class JobClassLoader extends URLClassLoader {
             // Imposta questo ClassLoader come context classloader
             currentThread.setContextClassLoader(this);
 
-            try (JobObjectInputStream ois = new JobObjectInputStream(
-                    new ByteArrayInputStream(data), this)) {
+            try (JobObjectInputStream ois = new JobObjectInputStream(new ByteArrayInputStream(data), this)) {
                 return (T) ois.readObject();
             }
         } finally {
@@ -183,15 +209,13 @@ public class JobClassLoader extends URLClassLoader {
     private static class JobObjectInputStream extends ObjectInputStream {
         private final ClassLoader classLoader;
 
-        public JobObjectInputStream(InputStream in, ClassLoader classLoader)
-                throws IOException {
+        public JobObjectInputStream(InputStream in, ClassLoader classLoader) throws IOException {
             super(in);
             this.classLoader = classLoader;
         }
 
         @Override
-        protected Class<?> resolveClass(ObjectStreamClass desc)
-                throws IOException, ClassNotFoundException {
+        protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
             try {
                 // Usa il JobClassLoader per caricare la classe
                 return Class.forName(desc.getName(), false, classLoader);

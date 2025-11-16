@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "it.jmr.grpc";
+option java_outer_classname = "JobProto";
+
+package mapreduce;
+
+// Servizio gestione job serializzati
+service JobService {
+  // Trasferisce il JOB al master tramite streaming
+  rpc uploadJob(stream JobChunk) returns (UploadJobResponse);  
+}
+
+
+// Chunk di dati del JOB per lo streaming
+message JobChunk {
+  bytes content = 1;           // Contenuto del chunk
+  string job_id = 2;           // ID univoco del JAR caricato
+}
+
+// Risposta al caricamento del JOB
+message UploadJobResponse {
+  bool success = 1;
+  string job_id = 2;           // ID univoco del JAR caricato
+  string message = 3;
+}

@@ -22,8 +22,9 @@ public class WorkerLauncher {
         service.start();
 
         // Avvio server worker
-        final String storageDir = "./worker-data/" + workerId;
-        final WorkerServer worker = new WorkerServer(workerId, port, storageDir);
+        final String jarStorageDir = "./worker-data/" + workerId + "/jars/";
+        final String jobStorageDir = "./worker-data/" + workerId + "/jobs/";
+        final WorkerServer worker = new WorkerServer(workerId, port, jarStorageDir, jobStorageDir);
         worker.start();
         worker.blockUntilShutdown();
     }

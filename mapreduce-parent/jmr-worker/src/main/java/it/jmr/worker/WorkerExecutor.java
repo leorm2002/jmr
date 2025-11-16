@@ -19,14 +19,14 @@ import it.jmr.common.providers.DataProviderClient;
 import it.jmr.common.utils.Pair;
 import it.jmr.grpc.worker.SubmitMapTaskRequest;
 import it.jmr.grpc.worker.SubmitReduceTaskRequest;
+import it.jmr.worker.models.WorkerContext;
 
 /**
  * Static class that executes the map and reduce tasks
  */
 public class WorkerExecutor {
 
-    public static <D extends Serializable, V extends Serializable, O extends Serializable> void executeReduce(
-            SubmitReduceTaskRequest request) {
+    public static <D extends Serializable, V extends Serializable, O extends Serializable> void executeReduce(SubmitReduceTaskRequest request) {
 
         try (JobClassLoaderOld classLoader = new JobClassLoaderOld(request.getJarId())) {
             String jarId = request.getJarId();
@@ -44,13 +44,10 @@ public class WorkerExecutor {
             // Esegue la riduzione
 
             Set<Entry<String, List<List<V>>>> partitionedData = mappedData.parallelStream()
-                    .collect(Collectors.groupingByConcurrent(Pair::getFirst,
-                            Collectors.mapping(Pair::getSecond, Collectors.toList())))
-                    .entrySet();
+                    .collect(Collectors.groupingByConcurrent(Pair::getFirst, Collectors.mapping(Pair::getSecond, Collectors.toList()))).entrySet();
 
-            List<Pair<String, List<O>>> reducedData = partitionedData.parallelStream()
-                    .map(e -> reducer.apply(e.getKey(),
-                            e.getValue().stream().flatMap(List::stream).collect(Collectors.toList())))
+            List<Pair<String, O>> reducedData = partitionedData.parallelStream()
+                    .map(e -> reducer.apply(e.getKey(), e.getValue().stream().flatMap(List::stream).collect(Collectors.toList())))
                     .collect(Collectors.toList());
 
             // System.out.println("--- Output del job ---");
@@ -78,7 +75,7 @@ public class WorkerExecutor {
      * Executes the map task as per the request
      */
     public static <D extends Serializable, K extends Serializable, V extends Serializable, O extends Serializable> Map<String, List<V>> executeMap(
-            SubmitMapTaskRequest request) {
+            SubmitMapTaskRequest request, WorkerContext ctx) {
 
         // 1. Carica il job dal jar
         // 2. Recupera i dati dal DataProvider
@@ -87,9 +84,13 @@ public class WorkerExecutor {
 
         // 1st step: load the job configuration
         final String jarId = request.getJarId();
+
+        final String jarPath = ctx.jarStorage.get(jarId);
+        final String jobPath = ctx.jobStorage.get(request.getJobId());
+
         JobConfiguration<D, V, O> jobConfig;
         try {
-            jobConfig = new JobClassLoader(jarId, "job.ser").deserializeFromFile();
+            jobConfig = new JobClassLoader(jarPath, jobPath).deserializeFromFile();
         } catch (Exception e) {
             throw new RuntimeException("Error in the loading of the job from the jar: " + e.getMessage(), e);
         }
@@ -112,11 +113,9 @@ public class WorkerExecutor {
         }
 
         // 3rd step: map data
-        final Map<String, List<V>> mappedData = data.parallelStream()
-                .map(mapper::apply).flatMap(Collection::stream)
+        final Map<String, List<V>> mappedData = data.parallelStream().map(mapper::apply).flatMap(Collection::stream)
                 // Sorting and partitioning
-                .collect(Collectors.groupingBy(Pair::getFirst,
-                        Collectors.mapping(Pair::getSecond, Collectors.toList())));
+                .collect(Collectors.groupingBy(Pair::getFirst, Collectors.mapping(Pair::getSecond, Collectors.toList())));
 
         // 4th step: return mapped data
         return mappedData;

@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "it.jmr.grpcdataprovider.grpc";
+option java_outer_classname = "DataProviderProto";
+
+package dataprovider;
+
+service DataProviderService {
+  rpc GetSize(SizeRequest) returns (SizeResponse);
+  rpc FetchChunk(ChunkRequest) returns (ChunkResponse);
+}
+
+message SizeRequest {}
+
+message SizeResponse {
+  int64 size = 1;
+}
+
+message ChunkRequest {
+  int64 offset = 1;
+  int64 limit = 2;
+}
+
+message ChunkResponse {
+  repeated bytes data = 1;  // Serialized objects
+}

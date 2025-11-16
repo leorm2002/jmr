@@ -70,6 +70,7 @@ message SubmitMapTaskRequest {
   int64 offset = 3;                    // Offset nel dataset
   int64 limit = 4;                     // Numero di elementi da processare
   string jar_id = 5;                   // Jar da dove recuperare la classe
+  string job_data_id = 6;               // Da dove il job serializzato
 }
 
 message SubmitMapTaskResponse {

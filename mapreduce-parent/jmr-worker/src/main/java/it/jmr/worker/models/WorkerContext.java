@@ -15,14 +15,16 @@ public class WorkerContext {
     public final IntermediateStorage intermediateStorage;
     public final String workerId;
     public final ConcurrentHashMap<String, String> jarStorage;
+    public final ConcurrentHashMap<String, String> jobStorage;
     public final ConcurrentHashMap<Pair<String, String>, WorkerTaskStatus> statusMap;
     public final ConcurrentHashMap<Pair<String, String>, TaskResult> taskResults = new ConcurrentHashMap<>();
 
-    public WorkerContext(IntermediateStorage inMemoryIntermediateStorage, String workerId) {
-        this.intermediateStorage = inMemoryIntermediateStorage;
+    public WorkerContext(IntermediateStorage intermediateStorage, String workerId) {
+        this.intermediateStorage = intermediateStorage;
         this.workerId = workerId;
         this.jarStorage = new ConcurrentHashMap<>();
         this.statusMap = new ConcurrentHashMap<>();
+        this.jobStorage = new ConcurrentHashMap<>();
     }
 
 }

@@ -1,5 +1,6 @@
 package it.jmr.master.models;
 
+import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -11,12 +12,16 @@ import io.grpc.health.v1.HealthCheckResponse;
 import io.grpc.health.v1.HealthGrpc;
 import it.jmr.common.JMRConstants;
 import it.jmr.common.WorkerTaskStatus;
+import it.jmr.common.jarservice.JarServiceClient;
+import it.jmr.common.jarservice.JobServiceClient;
 import it.jmr.common.models.IntermediateLocation;
+import it.jmr.common.models.JobConfiguration;
 import it.jmr.common.utils.JMRLog;
 import it.jmr.common.utils.Pair;
+import it.jmr.grpc.JarServiceGrpc;
+import it.jmr.grpc.JobServiceGrpc;
 import it.jmr.grpc.worker.GetMapTaskStatusRequest;
 import it.jmr.grpc.worker.GetMapTaskStatusResponse;
-import it.jmr.grpc.worker.IntermediateDataLocation;
 import it.jmr.grpc.worker.SubmitMapTaskResponse;
 import it.jmr.grpc.worker.WorkerServiceGrpc;
 import it.jmr.master.WorkerI;
@@ -30,6 +35,8 @@ public class Worker {
     private final ManagedChannel channel;
     private final WorkerServiceGrpc.WorkerServiceBlockingStub stub;
     private final HealthGrpc.HealthBlockingStub healthStub;
+    private final JarServiceGrpc.JarServiceStub jarAsyncStub;
+    private final JobServiceGrpc.JobServiceStub jobAsyncStub;
 
     public Worker(final WorkerI workerI) {
         this.workerId = workerI.workerId();
@@ -40,6 +47,8 @@ public class Worker {
         this.channel = io.grpc.ManagedChannelBuilder.forAddress(address, port).usePlaintext().build();
         this.stub = WorkerServiceGrpc.newBlockingStub(channel);
         this.healthStub = HealthGrpc.newBlockingStub(channel);
+        this.jarAsyncStub = JarServiceGrpc.newStub(channel);
+        this.jobAsyncStub = JobServiceGrpc.newStub(channel);
     }
 
     public String getAddress() {
@@ -79,8 +88,16 @@ public class Worker {
         }
     }
 
-    public boolean submitMapTask(String jobId, String taskId, int offset, int limit, String jarId) {
+    public <D extends Serializable, V extends Serializable, O extends Serializable> boolean submitMapTask(String jobId, String taskId, int offset,
+            int limit, String jarPath, JobConfiguration<D, V, O> jobConfig) {
         try {
+
+            // 1. carica il jar sul worker
+            final String jarId = JarServiceClient.uploadJar(jarPath, jarAsyncStub);
+            // 2. invia il job serializzato
+            JobServiceClient.uploadJob(jobConfig, jobId, jobAsyncStub);
+
+            // 3. invia il submit
             final it.jmr.grpc.worker.SubmitMapTaskRequest request = it.jmr.grpc.worker.SubmitMapTaskRequest.newBuilder().setTaskId(taskId)
                     .setJobId(jobId).setOffset(offset).setLimit(limit).setJarId(jarId).build();
             final SubmitMapTaskResponse response = stub.submitMapTask(request);

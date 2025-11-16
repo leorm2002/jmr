@@ -24,7 +24,13 @@
             <groupId>it.jmr</groupId>
             <artifactId>jmr-client</artifactId>
             <version>${jmr.version}</version>
-            <scope>provided</scope>
+        </dependency>
+        <!--per
+        creare server grpc-->
+        <dependency>
+            <groupId>it.jmr</groupId>
+            <artifactId>jmr-grpcdataprovider</artifactId>
+            <version>${jmr.version}</version>
         </dependency>
     </dependencies>
 
@@ -44,7 +50,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>com.example.Submitter</mainClass>
+                            <mainClass>com.example.MyWcJob</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
@@ -58,7 +64,7 @@
                     </descriptorRefs>
                     <archive>
                         <manifest>
-                            <mainClass>com.example.Submitter</mainClass>
+                            <mainClass>com.example.MyWcJob</mainClass>
                         </manifest>
                     </archive>
                 </configuration>

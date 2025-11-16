@@ -8,7 +8,7 @@ import it.jmr.common.models.SerializableReducer;
 import it.jmr.common.providers.DataProviderClient;
 import it.jmr.common.utils.Pair;
 
-public class MyJob extends JobConfiguration<String, Integer, Integer> {
+public class MyJob implements JobConfiguration<String, Integer, Integer> {
 
     @Override
     public DataProviderClient<String> getDataProvider() {
@@ -28,7 +28,7 @@ public class MyJob extends JobConfiguration<String, Integer, Integer> {
         }
         return (key, values) -> {
             int sum = values.stream().mapToInt(Integer::intValue).sum();
-            return Pair.of(key, List.of(sum));
+            return Pair.of(key, sum);
         };
     }
 

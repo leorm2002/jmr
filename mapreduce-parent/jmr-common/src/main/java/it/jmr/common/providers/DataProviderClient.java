@@ -10,13 +10,14 @@ import java.util.List;
  * inviate dal master ai worker remoti per accedere ai dati distribuiti.
  */
 public interface DataProviderClient<D extends Serializable> extends Serializable, AutoCloseable {
-    
+    static final long serialVersionUID = 1L;
+
     /**
-     * Inizializza la connessione al server remoto.
-     * Deve essere chiamato prima di qualsiasi operazione di fetch.
+     * Inizializza la connessione al server remoto. Deve essere chiamato prima di
+     * qualsiasi operazione di fetch.
      */
     void init();
-    
+
     /**
      * Restituisce la dimensione totale dei dati dal server remoto.
      *
@@ -24,7 +25,7 @@ public interface DataProviderClient<D extends Serializable> extends Serializable
      * @throws IOException se si verificano problemi di connessione o accesso.
      */
     long size() throws IOException;
-    
+
     /**
      * Recupera un blocco di dati dal server remoto.
      *
@@ -34,7 +35,7 @@ public interface DataProviderClient<D extends Serializable> extends Serializable
      * @throws IOException se si verificano problemi di connessione o accesso.
      */
     List<D> fetchChunk(long offset, long limit) throws IOException;
-    
+
     /**
      * Chiude la connessione al server remoto.
      *

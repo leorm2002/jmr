@@ -13,6 +13,7 @@
         <module>jmr-client</module>
         <module>jmr-master</module>
         <module>jmr-worker</module>
+        <module>jmr-grpcdataprovider</module>
     </modules>
 
     <name>MapReduce Distributed System</name>
