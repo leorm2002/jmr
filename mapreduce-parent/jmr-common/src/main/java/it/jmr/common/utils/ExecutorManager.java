@@ -8,7 +8,7 @@ import org.slf4j.LoggerFactory;
 
 public class ExecutorManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(ExecutorManager.class);
-    private static final ExecutorService EXECUTOR =Executors.newVirtualThreadPerTaskExecutor();
+    private static final ExecutorService EXECUTOR =Executors.newFixedThreadPool(20);
 
     private ExecutorManager() {}
 

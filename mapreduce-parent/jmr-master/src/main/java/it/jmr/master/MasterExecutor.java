@@ -2,7 +2,6 @@ package it.jmr.master;
 
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -91,8 +90,12 @@ public class MasterExecutor implements Runnable {
             if (job != null) {
                 try {
                     executeJob(job, ctx.workers);
-                } catch (Exception e) {
+                } catch (JMRException e) {
                     JMRLog.error(LOGGER, "Error executing job {}: {}", job.getJobId(), e.getMessage());
+                } catch (Exception e) {
+                    JMRLog.error(LOGGER, "Unexpected error executing job {}: {}", job.getJobId(), e.getMessage());
+                } catch (Throwable t) {
+                    JMRLog.error(LOGGER, "Fatal error executing job {}: {} {}", job.getJobId(), t.getCause(), t.getMessage());
                 }
             }
 
@@ -125,7 +128,7 @@ public class MasterExecutor implements Runnable {
         final AtomicBoolean stopForError = new AtomicBoolean(false);
 
         final Future<?> assignerFuture = ExecutorManager.getExecutor()
-                .submit(() -> submitUnassignedTasks(workers, assignedTasks, unassignedQueue, stopForError, jobConfig));
+                .submit(() -> submitUnassignedMapTasks(workers, assignedTasks, unassignedQueue, stopForError, jobConfig));
 
         final Future<?> monitorFuture = ExecutorManager.getExecutor()
                 .submit(() -> monitorAssignedMapTasks(mapTasks, assignedTasks, completedTasks, unassignedQueue, stopForError));
@@ -141,7 +144,7 @@ public class MasterExecutor implements Runnable {
 
         JMRLog.debug(LOGGER, "STARTING REDUCE PHASE");
 
-        final List<UnassignedReduceTasks> reduceTasks = createReduceTasks(jobInfo, jarId, partitions).stream().limit(300).toList();
+        final List<UnassignedReduceTasks> reduceTasks = createReduceTasks(jobInfo, jarId, partitions).stream().toList();
 
         final List<AssignedReduceTasks> assignedReduceTasks = new CopyOnWriteArrayList<>();
         final List<CompletedReduceTasks<O>> completedReduceTasks = new CopyOnWriteArrayList<>();
@@ -261,8 +264,9 @@ public class MasterExecutor implements Runnable {
             JobInfoInternal jobInfo, final String jobJarPath, final String jobSerializedPath) throws JMRException {
 
         final JobConfiguration<D, V, O> jobConfig;
+        JobClassLoader loader = new JobClassLoader(jobJarPath, jobSerializedPath);
         try {
-            jobConfig = new JobClassLoader(jobJarPath, jobSerializedPath).deserializeFromFile();
+            jobConfig = loader.deserializeFromFile();
         } catch (Exception e) {
             jobInfo.setStatus(JobStatus.FAILED);
             jobInfo.setErrorMessage(e.getMessage());
@@ -281,8 +285,21 @@ public class MasterExecutor implements Runnable {
     private static <O extends Serializable> void monitorAssignedReduceTasks(final List<UnassignedReduceTasks> reduceTasks,
             final List<AssignedReduceTasks> assignedReduceTasks, final List<CompletedReduceTasks<O>> completedReduceTasks,
             final Queue<UnassignedReduceTasks> unassignedReduceQueue, final AtomicBoolean stopForError) {
-        while (!stopForError.get() && completedReduceTasks.size() < reduceTasks.size()) {
-            JMRLog.debug(LOGGER, "Monitoring assigned reduce tasks: {} completed out of {}", completedReduceTasks.size(), reduceTasks.size());
+
+        final int totalTasks = reduceTasks.size();
+        int lastLoggedPercentage = -1;
+
+        while (!stopForError.get() && completedReduceTasks.size() < totalTasks) {
+            // Calcolo della percentuale corrente
+            int currentCompleted = completedReduceTasks.size();
+            int currentPercentage = (totalTasks > 0) ? (currentCompleted * 100 / totalTasks) : 100;
+
+            if (currentPercentage >= lastLoggedPercentage + 2) {
+                JMRLog.info(LOGGER, "Reduce Progress: {}% ({} su {} task completati)", currentPercentage, currentCompleted, totalTasks);
+                lastLoggedPercentage = currentPercentage;
+            }
+
+            JMRLog.debug(LOGGER, "Monitoring assigned reduce tasks: {} completed out of {}", currentCompleted, totalTasks);
             final List<AssignedReduceTasks> toRemove = new ArrayList<>();
 
             for (final AssignedReduceTasks assigned : assignedReduceTasks) {
@@ -304,11 +321,13 @@ public class MasterExecutor implements Runnable {
             }
 
             assignedReduceTasks.removeAll(toRemove);
-
             JmrUtils.sleep(JMRConstants.REDUCE_TASK_MONITOR_SLEEP_MS);
         }
 
-        int x = 10;
+        // Log finale per confermare il 100%
+        if (!stopForError.get()) {
+            JMRLog.info(LOGGER, "Reduce Progress: 100% ({} su {} task completati)", totalTasks, totalTasks);
+        }
     }
 
     private static <D extends Serializable, V extends Serializable, O extends Serializable> void submitUnassignedReduceTasks(List<Worker> workers,
@@ -317,6 +336,7 @@ public class MasterExecutor implements Runnable {
         while (!(unassignedReduceQueue.isEmpty() && assignedReduceTasks.isEmpty()) && !stopForError.get()) {
             final UnassignedReduceTasks task = unassignedReduceQueue.poll();
             if (task == null) {
+                JmrUtils.sleep(JMRConstants.REDUCE_TASK_SCHEDULER_SLEEP_MS);
                 continue;
             }
             JMRLog.debug(LOGGER, "Starting reduce task assignment process for {}", task.taskId());
@@ -331,8 +351,8 @@ public class MasterExecutor implements Runnable {
             } else {
                 JMRLog.debug(LOGGER, "No worker available for reduce task {}", task.taskId());
                 unassignedReduceQueue.offer(task);
+                // JmrUtils.sleep(JMRConstants.REDUCE_TASK_SCHEDULER_SLEEP_MS);
 
-                JmrUtils.sleep(JMRConstants.REDUCE_TASK_SCHEDULER_SLEEP_MS);
             }
 
         }
@@ -343,6 +363,7 @@ public class MasterExecutor implements Runnable {
         final Set<Worker> busy = assignedReduceTasks.stream().map(AssignedReduceTasks::worker).collect(Collectors.toSet());
         for (final Worker worker : workers) {
             if (busy.contains(worker)) {
+                JMRLog.debug(LOGGER, "Worker {} is busy, skipping for reduce task {}", worker.getWorkerId(), task.taskId());
                 continue;
             }
 
@@ -391,12 +412,13 @@ public class MasterExecutor implements Runnable {
         }
     }
 
-    private static <D extends Serializable, V extends Serializable, O extends Serializable> void submitUnassignedTasks(List<Worker> workers,
+    private static <D extends Serializable, V extends Serializable, O extends Serializable> void submitUnassignedMapTasks(List<Worker> workers,
             final List<AssignedMapTasks> assignedTasks, final Queue<UnassignedMapTasks> unassignedQueue, final AtomicBoolean stopForError,
             JobConfiguration<D, V, O> jobConfig) {
         while (!(unassignedQueue.isEmpty() && assignedTasks.isEmpty()) && !stopForError.get()) {
             final UnassignedMapTasks task = unassignedQueue.poll();
             if (task == null) {
+                JmrUtils.sleep(JMRConstants.MAP_TASK_SCHEDULER_SLEEP_MS);
                 continue;
             }
             JMRLog.debug(LOGGER, "Starting task assignment process for {}", task.taskId());
@@ -411,14 +433,8 @@ public class MasterExecutor implements Runnable {
             } else {
                 JMRLog.debug(LOGGER, "No worker available for task {}", task.taskId());
                 unassignedQueue.offer(task);
+                JmrUtils.sleep(JMRConstants.MAP_TASK_SCHEDULER_SLEEP_MS);
 
-                try {
-                    Thread.sleep(JMRConstants.MAP_TASK_SCHEDULER_SLEEP_MS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    stopForError.set(true);
-                    break;
-                }
             }
 
         }
@@ -440,6 +456,7 @@ public class MasterExecutor implements Runnable {
         final Set<Worker> busy = assignedTasks.stream().map(AssignedMapTasks::worker).collect(Collectors.toSet());
         for (final Worker worker : workers) {
             if (busy.contains(worker)) {
+                JMRLog.debug(LOGGER, "Worker {} is busy, skipping for task {}", worker.getWorkerId(), task.taskId());
                 continue;
             }
 

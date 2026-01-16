@@ -9,6 +9,7 @@ import it.jmr.common.utils.JMRLog;
 import it.jmr.common.utils.JmrUtils;
 
 import java.io.*;
+import java.nio.file.Path;
 import java.util.List;
 
 import org.slf4j.Logger;
@@ -19,14 +20,14 @@ public class MasterServer implements AutoCloseable {
     private final MasterContext ctx;
     private final Server server;
 
-    public MasterServer(int port, List<WorkerI> workers, String jarStorageDir, String jobStorageDir) {
-        this.ctx = new MasterContext(port, jarStorageDir, jobStorageDir, workers);
+    public MasterServer(int port, List<WorkerI> workers, Path rootStoragePath, Path jarStorageDirectory, Path jobStorageDirectory) {
+        this.ctx = new MasterContext(port, rootStoragePath, jarStorageDirectory, jobStorageDirectory, workers);
 
-        new File(jarStorageDir).mkdirs();
-        JMRLog.debug(LOGGER, "JAR storage directory: {}", jarStorageDir);
+        jarStorageDirectory.toFile().mkdirs();
+        JMRLog.debug(LOGGER, "JAR storage directory: {}", jarStorageDirectory.toString());
 
-        new File(jobStorageDir).mkdirs();
-        JMRLog.debug(LOGGER, "Job storage directory: {}", jobStorageDir);
+        jobStorageDirectory.toFile().mkdirs();
+        JMRLog.debug(LOGGER, "Job storage directory: {}", jobStorageDirectory.toString());
 
         JMRLog.debug(LOGGER, "Starting the job executor...");
         ExecutorManager.getExecutor().submit(new MasterExecutor(ctx));
@@ -39,9 +40,9 @@ public class MasterServer implements AutoCloseable {
                 // The MapReduce service that handles job execution requests
                 .addService(new MapReduceServiceImpl(ctx.jarsPaths, ctx.jobsPaths, ctx.jobQueue)) //
                 // Handles the JARs uploaded from the client
-                .addService(new JarServiceImpl(jarStorageDir, ctx.jarsPaths, resourceDistributor))
+                .addService(new JarServiceImpl(jarStorageDirectory, ctx.jarsPaths, resourceDistributor))
                 // Handles the Jobs uploaded from the client
-                .addService(new JobServiceImpl(jobStorageDir, ctx.jobsPaths, resourceDistributor)) //
+                .addService(new JobServiceImpl(jobStorageDirectory, ctx.jobsPaths, resourceDistributor)) //
                 .maxInboundMessageSize(100 * 1024 * 1024) // 100MB
                 .build();
     }
@@ -52,7 +53,8 @@ public class MasterServer implements AutoCloseable {
         LOGGER.info("║   MapReduce Master Server v2.0 (gRPC)  ║");
         LOGGER.info("╚════════════════════════════════════════╝");
         LOGGER.info("Port: {}", ctx.port);
-        LOGGER.info("JAR Storage: {}", new File(ctx.jarStorageDir).getAbsolutePath());
+        LOGGER.info("JAR Storage: {}", ctx.jarStorageDir.toAbsolutePath());
+        LOGGER.info("\nJob Storage: {}", ctx.jobStorageDir.toAbsolutePath());
         LOGGER.info("\ngRPC server listening...\n");
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {

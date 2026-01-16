@@ -13,8 +13,6 @@ import io.grpc.health.v1.HealthCheckResponse;
 import io.grpc.health.v1.HealthGrpc;
 import it.jmr.common.JMRConstants;
 import it.jmr.common.WorkerTaskStatus;
-import it.jmr.common.jarservice.JarServiceClient;
-import it.jmr.common.jarservice.JobServiceClient;
 import it.jmr.common.models.IntermediateLocation;
 import it.jmr.common.models.JobConfiguration;
 import it.jmr.common.utils.JMRLog;
@@ -150,15 +148,14 @@ public class Worker {
     public <D extends Serializable, V extends Serializable, O extends Serializable> boolean submitReduceTask(String jobId, String taskId,
             String jarId, String partitionId, List<it.jmr.grpc.worker.IntermediateDataLocation> locations, JobConfiguration<D, V, O> jobConfig) {
         try {
-
-            JMRLog.info(LOGGER, "Submitting map task {} for job {} to worker {}", taskId, jobId, workerId);
-
-            JMRLog.info(LOGGER, "Submitting reduce task {} for job {} to worker {}", taskId, jobId, workerId);
+            // JMRLog.info(LOGGER, "Submitting reduce task {} for job {} to worker {}",
+            // taskId, jobId, workerId);
             final it.jmr.grpc.worker.SubmitReduceTaskRequest request = it.jmr.grpc.worker.SubmitReduceTaskRequest.newBuilder().setJobId(jobId)
                     .setTaskId(taskId).setJarId(jarId).setPartitionId(partitionId).addAllLocations(locations).build();
             final it.jmr.grpc.worker.SubmitReduceTaskResponse response = stub.submitReduceTask(request);
             if (response.getSuccess()) {
-                JMRLog.info(LOGGER, "Reduce task {} for job {} submitted successfully to worker {}", taskId, jobId, workerId);
+                // JMRLog.info(LOGGER, "Reduce task {} for job {} submitted successfully to
+                // worker {}", taskId, jobId, workerId);
             } else {
                 JMRLog.error(LOGGER, "Failed to submit reduce task {} for job {} to worker {}: {}", taskId, jobId, workerId,
                         response.getErrorMessage());

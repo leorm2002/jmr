@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.nio.file.Path;
 
 public class JmrUtils {
     public static void sleep(int pauseTimeInMillis) {
@@ -28,12 +29,12 @@ public class JmrUtils {
         return str == null || str.trim().isEmpty();
     }
 
-    public static void deleteFolder(String folderPath) {
-        java.io.File folder = new java.io.File(folderPath);
+    public static void deleteFolder(Path folderPath) {
+        java.io.File folder = folderPath.toFile();
         if (folder.exists() && folder.isDirectory()) {
             for (java.io.File file : folder.listFiles()) {
                 if (file.isDirectory()) {
-                    deleteFolder(file.getAbsolutePath());
+                    deleteFolder(file.toPath());
                 } else {
                     file.delete();
                 }

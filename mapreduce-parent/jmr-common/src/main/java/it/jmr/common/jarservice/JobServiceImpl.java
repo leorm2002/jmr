@@ -4,7 +4,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
@@ -16,15 +15,14 @@ import it.jmr.common.utils.JmrUtils;
 import it.jmr.grpc.JobChunk;
 import it.jmr.grpc.JobServiceGrpc;
 import it.jmr.grpc.UploadJobResponse;
-// Removed import it.jmr.master.MasterContext; // Added import
 
 public class JobServiceImpl extends JobServiceGrpc.JobServiceImplBase {
     private static final Logger LOGGER = LoggerFactory.getLogger(JobServiceImpl.class);
-    private ConcurrentHashMap<String, String> jobStorage;
-    private String jobStorageDir;
-    private final ResourceUploadedCallback callback; // Added field
+    private final ConcurrentHashMap<String, String> jobStorage;
+    private final Path jobStorageDir;
+    private final ResourceUploadedCallback callback;
 
-    public JobServiceImpl(String jobStorageDir, ConcurrentHashMap<String, String> jobStorage, ResourceUploadedCallback callback) {
+    public JobServiceImpl(Path jobStorageDir, ConcurrentHashMap<String, String> jobStorage, ResourceUploadedCallback callback) {
         this.jobStorageDir = jobStorageDir;
         this.jobStorage = jobStorage;
         this.callback = callback;
@@ -61,7 +59,7 @@ public class JobServiceImpl extends JobServiceGrpc.JobServiceImplBase {
                 try {
                     final byte[] fileData = outputStream.toByteArray();
                     final String filename = JmrUtils.isEmpty(jobId) ? JmrUtils.generateJobId() : jobId;
-                    final Path filepath = Paths.get(jobStorageDir, filename);
+                    final Path filepath = jobStorageDir.resolve(filename);
 
                     jobStorage.put(filename, filepath.toString());
                     // Save the file to disk

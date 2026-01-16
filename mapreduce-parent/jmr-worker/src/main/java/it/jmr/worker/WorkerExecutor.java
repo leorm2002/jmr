@@ -1,9 +1,7 @@
 package it.jmr.worker;
 
-import java.io.IOException;
 import java.io.Serializable;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -130,8 +128,9 @@ public class WorkerExecutor {
     private static <D extends Serializable, V extends Serializable, O extends Serializable> JobConfiguration<D, V, O> deserializeJobConfig(
             final String jarPath, final String jobPath) throws JMRException {
         final JobConfiguration<D, V, O> jobConfig;
+        JobClassLoader loader = new JobClassLoader(jarPath, jobPath);
         try {
-            jobConfig = new JobClassLoader(jarPath, jobPath).deserializeFromFile();
+            jobConfig = loader.deserializeFromFile();
         } catch (Exception e) {
             LOGGER.error("Error loading job from jar", e);
             throw new JMRException("Error loading job from jar: " + e.getMessage(), e);

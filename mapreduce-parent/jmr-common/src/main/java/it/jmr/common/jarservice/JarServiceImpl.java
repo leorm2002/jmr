@@ -3,10 +3,8 @@ package it.jmr.common.jarservice;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.util.UUID;
+import java.nio.file.Path;
 import java.util.concurrent.ConcurrentHashMap;
-
-import javax.management.JMRuntimeException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,10 +22,10 @@ public class JarServiceImpl extends JarServiceGrpc.JarServiceImplBase {
     private static final Logger LOGGER = LoggerFactory.getLogger(JarServiceImpl.class);
 
     private final ConcurrentHashMap<String, String> jarStorage;
-    private final String jarStorageDir;
+    private final Path jarStorageDir;
     private final ResourceUploadedCallback callback; // Added field
 
-    public JarServiceImpl(String jarStorageDir, ConcurrentHashMap<String, String> jarStorage, ResourceUploadedCallback callback) {
+    public JarServiceImpl(Path jarStorageDir, ConcurrentHashMap<String, String> jarStorage, ResourceUploadedCallback callback) {
         this.jarStorageDir = jarStorageDir;
         this.jarStorage = jarStorage;
         this.callback = callback;
@@ -50,7 +48,7 @@ public class JarServiceImpl extends JarServiceGrpc.JarServiceImplBase {
                         // Use provided jar_id if present, otherwise generate a new one
                         String providedId = chunk.getJarId();
                         jarId = JmrUtils.isEmpty(providedId) ? JmrUtils.generateJarId() : providedId;
-                        jarPath = jarStorageDir + "/" + jarId + ".jar";
+                        jarPath = jarStorageDir.resolve(jarId + ".jar").toString();
                         totalSize = chunk.getTotalSize();
                         fos = new FileOutputStream(jarPath);
                         LOGGER.info("Receiving JAR: {} ({} bytes) with ID: {}", chunk.getJarName(), totalSize, jarId);

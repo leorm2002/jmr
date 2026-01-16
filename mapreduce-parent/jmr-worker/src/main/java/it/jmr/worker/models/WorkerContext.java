@@ -1,5 +1,6 @@
 package it.jmr.worker.models;
 
+import java.nio.file.Path;
 import java.util.concurrent.ConcurrentHashMap;
 
 import it.jmr.common.WorkerTaskStatus;
@@ -16,14 +17,14 @@ public class WorkerContext {
     public final String workerId;
     public final ConcurrentHashMap<String, String> jarStorage;
     public final ConcurrentHashMap<String, String> jobStorage;
-    public final String jarStorageDir;
-    public final String jobStorageDir;
+    public final Path jarStorageDir;
+    public final Path jobStorageDir;
     public final int port;
     public final ConcurrentHashMap<Pair<String, String>, WorkerTaskStatus> statusMap;
     public final ConcurrentHashMap<Pair<String, String>, TaskResult> mapTaskResults = new ConcurrentHashMap<>();
     public final ConcurrentHashMap<Pair<String, String>, ReduceTaskResult> reduceTaskResults = new ConcurrentHashMap<>();
 
-    public WorkerContext(IntermediateStorage intermediateStorage, String workerId, String jarStorageDir, String jobStorageDir, int port) {
+    public WorkerContext(IntermediateStorage intermediateStorage, String workerId, Path jarStorageDir, Path jobStorageDir, int port) {
         this.intermediateStorage = intermediateStorage;
         this.workerId = workerId;
         this.jarStorage = new ConcurrentHashMap<>();

@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import it.jmr.common.exceptions.JMRException;
-import it.jmr.common.models.JobConfiguration;
 import it.jmr.common.utils.JMRLog;
 
 /**
@@ -18,7 +17,6 @@ import it.jmr.common.utils.JMRLog;
  */
 public class JobClassLoader extends URLClassLoader {
     private static final Logger LOGGER = LoggerFactory.getLogger(JobClassLoader.class);
-    private final String jarPath;
     private final String filePath;
 
     /**
@@ -31,7 +29,6 @@ public class JobClassLoader extends URLClassLoader {
     public JobClassLoader(String jarPath, String filePath) throws JMRException {
         super(getJarUrl(jarPath), JobClassLoader.class.getClassLoader());
 
-        this.jarPath = jarPath;
         this.filePath = filePath;
 
         // Verify that the JAR exists

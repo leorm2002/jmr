@@ -34,6 +34,7 @@ public class Job {
         <O extends Serializable> JobConfiguration<D, V, O> reduce(SerializableReducer<V, O> reducer);
     }
 
+    @SuppressWarnings("unchecked")
     private static class Builder<D extends Serializable, V extends Serializable, O extends Serializable>
             implements DataProviderStep, MapperStep<D>, ReducerStep<D, V>, JobConfiguration<D, V, O> {
 

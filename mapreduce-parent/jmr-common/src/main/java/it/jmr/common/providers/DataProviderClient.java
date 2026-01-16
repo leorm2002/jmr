@@ -1,6 +1,5 @@
 package it.jmr.common.providers;
 
-import java.io.IOException;
 import java.io.Serializable;
 import java.util.List;
 

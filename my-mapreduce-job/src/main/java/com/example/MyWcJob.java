@@ -58,20 +58,23 @@ public class MyWcJob {
                     return new Pair<>(entr, sum);
                 });
 
-        // TODO: check esistenza all'avvio
-        final JMRClient jmrClient = new it.jmr.client.JMRClient(host, port);
+        try (final JMRClient jmrClient = new it.jmr.client.JMRClient(host, port)) {
+            // Invio il mio job al cluster
+            jmrClient.submit(jarPath, job);
 
-        // Invio il mio job al cluster
-        jmrClient.submit(jarPath, job);
+            while (true) {
+                final String status = jmrClient.getJobStatus();
+                System.out.println("Job status: " + status);
+                Thread.sleep(10000); // Attendi 10 secondi prima di controllare di nuovo
 
-        while (true) {
-            final String status = jmrClient.getJobStatus();
-            System.out.println("Job status: " + status);
-            Thread.sleep(10000); // Attendi 10 secondi prima di controllare di nuovo
-
-            if ("COMPLETED".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status)) {
-                break;
+                if ("COMPLETED".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status)) {
+                    break;
+                }
             }
+        } catch (InterruptedException e) {
+            throw e;
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 

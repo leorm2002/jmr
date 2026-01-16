@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +34,6 @@ import it.jmr.grpc.worker.GetWorkerStatusResponse;
 import it.jmr.grpc.worker.HeartbeatRequest;
 import it.jmr.grpc.worker.HeartbeatResponse;
 import it.jmr.grpc.worker.IntermediateDataChunk;
-import it.jmr.grpc.worker.IntermediateDataLocation;
 import it.jmr.grpc.worker.ReducedData;
 import it.jmr.grpc.worker.WorkerServiceGrpc;
 import it.jmr.grpc.worker.WorkerState;
@@ -92,6 +92,16 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         }
 
         final TaskResult taskResult = workerNode.mapTaskResults.get(Pair.of(jobId, taskId));
+
+        // Safety check in case status is COMPLETED but result is missing (race
+        // condition or error)
+        if (taskResult == null) {
+            JMRLog.error(LOGGER, "Status is COMPLETED but result is missing for task {}", taskId);
+            responseObserver.onNext(GetMapTaskStatusResponse.newBuilder().setState(TaskState.TASK_FAILED).build());
+            responseObserver.onCompleted();
+            return;
+        }
+
         final List<PartitionInfo> partitions = taskResult.getPartitions();
         final List<GetMapTaskStatusResponseIntermediateDataLocation> locations = new LinkedList<>();
         for (final PartitionInfo partitionInfo : partitions) {
@@ -103,7 +113,6 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
 
         responseObserver.onNext(GetMapTaskStatusResponse.newBuilder().addAllLocations(locations).setState(TaskState.TASK_COMPLETED).build());
         responseObserver.onCompleted();
-
     }
 
     @Override
@@ -111,97 +120,116 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         final String jobId = request.getJobId();
         final String taskId = request.getTaskId();
 
-        JMRLog.info(LOGGER, "\n>>> Received MAP task: {} for job:જી", taskId, jobId);
+        JMRLog.info(LOGGER, "\n>>> Received MAP task: {} for job: {}", taskId, jobId);
 
-        // If the worker is busy, reject the task
-        boolean success;
+        // 1. Controllo Busy e Rifiuto Immediato
         if (this.workerNode.busy) {
-            JMRLog.warn(LOGGER, "Worker is busy. Rejecting task: {}", request.getTaskId());
-            success = false;
-        } else {
-            // Set the worker as busy
-            this.workerNode.busy = true;
-            success = true;
-        }
-
-        // Send task acceptance response
-        final SubmitMapTaskResponse response = SubmitMapTaskResponse.newBuilder().setSuccess(success).build();
-        responseObserver.onNext(response);
-        responseObserver.onCompleted();
-
-        if (!success) {
+            JMRLog.warn(LOGGER, "Worker is busy. Rejecting MAP task: {}", taskId);
+            responseObserver.onNext(SubmitMapTaskResponse.newBuilder().setSuccess(false).build());
+            responseObserver.onCompleted();
             return;
         }
 
+        // 2. Accettazione Task
+        this.workerNode.busy = true;
+        // Impostiamo subito lo stato a RUNNING così i primi heartbeat rileveranno il
+        // lavoro
         workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.RUNNING);
 
-        // Start the map task synchronously
-        final long startTime = System.currentTimeMillis();
-        final List<PartitionInfo> partitionInfos = new ArrayList<>();
-        try {
-            JMRLog.info(LOGGER, ">>> Starting MAP task execution: {}", taskId);
-            final Map<String, List<Serializable>> mappedData = WorkerExecutor.executeMap(request, workerNode);
-            JMRLog.info(LOGGER, ">>> Completed MAP task execution: {}", taskId);
+        // 3. Risposta gRPC immediata (ACK)
+        // Il Master riceve "true" che significa "Ho accettato il lavoro", non "Ho
+        // finito".
+        final SubmitMapTaskResponse response = SubmitMapTaskResponse.newBuilder().setSuccess(true).build();
+        responseObserver.onNext(response);
+        responseObserver.onCompleted();
 
-            // Save the mapped data to local storage keeping track of partitions
-            for (Map.Entry<String, List<Serializable>> entry : mappedData.entrySet()) {
-                final String partitionId = entry.getKey();
-                final List<Serializable> data = entry.getValue();
-                partitionInfos.add(workerNode.intermediateStorage.savePartitionData(taskId, partitionId, data));
+        // 4. Esecuzione Asincrona (Non blocca il thread gRPC)
+        CompletableFuture.runAsync(() -> {
+            final long startTime = System.currentTimeMillis();
+            try {
+                JMRLog.info(LOGGER, ">>> Starting ASYNC MAP execution: {}", taskId);
+
+                final Map<String, List<Serializable>> mappedData = WorkerExecutor.executeMap(request, workerNode);
+
+                // Salvataggio partizioni
+                final List<PartitionInfo> partitionInfos = new ArrayList<>();
+                for (Map.Entry<String, List<Serializable>> entry : mappedData.entrySet()) {
+                    final String partitionId = entry.getKey();
+                    final List<Serializable> data = entry.getValue();
+                    partitionInfos.add(workerNode.intermediateStorage.savePartitionData(taskId, partitionId, data));
+                }
+
+                final long executionTime = System.currentTimeMillis() - startTime;
+
+                // Aggiornamento risultati e stato
+                final TaskResult taskResult = new TaskResult(jobId, taskId, partitionInfos, executionTime);
+                workerNode.mapTaskResults.put(Pair.of(jobId, taskId), taskResult);
+                workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.COMPLETED);
+
+                JMRLog.info(LOGGER, "<<< MAP task completed: {} ({}ms)", taskId, executionTime);
+
+            } catch (Exception e) {
+                JMRLog.error(LOGGER, "Error during ASYNC MAP execution: " + taskId, e);
+                workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.FAILED);
+            } finally {
+                // Rilascia il worker per nuovi task
+                this.workerNode.busy = false;
             }
-            workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.COMPLETED);
-
-        } catch (JMRException e) {
-            JMRLog.error(LOGGER, "Error during MAP task execution: " + taskId, e);
-            workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.FAILED);
-        }
-        // Set the worker as not busy
-        this.workerNode.busy = false;
-
-        final long executionTime = System.currentTimeMillis() - startTime;
-        JMRLog.info(LOGGER, "<<< MAP task completed: {} ({}ms)", taskId, executionTime);
-
-        // Save the task info
-        final TaskResult taskResult = new TaskResult(jobId, taskId, partitionInfos, executionTime);
-        workerNode.mapTaskResults.put(Pair.of(jobId, taskId), taskResult);
+        });
     }
 
     @Override
     public void submitReduceTask(SubmitReduceTaskRequest request, StreamObserver<SubmitReduceTaskResponse> responseObserver) {
-        JMRLog.info(LOGGER, "\n>>> Executing REDUCE task: {}", request.getTaskId());
+        final String jobId = request.getJobId();
+        final String taskId = request.getTaskId();
+
+        JMRLog.info(LOGGER, "\n>>> Received REDUCE task: {} for job: {}", taskId, jobId);
         JMRLog.info(LOGGER, "    Partition: {}", request.getPartitionId());
 
-        String taskId = request.getTaskId();
-        String jobId = request.getJobId();
-
-        try {
-            final long startTime = System.currentTimeMillis();
-            List<Pair<String, Serializable>> reducedData = WorkerExecutor.executeReduce(request, workerNode, workerServer);
-            final long executionTime = System.currentTimeMillis() - startTime;
-
-            // Save the task info
-            final ReduceTaskResult taskResult = new ReduceTaskResult(jobId, taskId, reducedData, executionTime);
-            workerNode.reduceTaskResults.put(Pair.of(jobId, taskId), taskResult);
-            workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.COMPLETED);
-
-            final SubmitReduceTaskResponse response = SubmitReduceTaskResponse.newBuilder().setSuccess(true).setTaskId(taskId)
-                    .setExecutionTimeMs(executionTime).build();
-
-            JMRLog.info(LOGGER, "<<< REDUCE task completed: {} ({}ms)", taskId, executionTime);
-
-            responseObserver.onNext(response);
+        // 1. Controllo Busy
+        if (this.workerNode.busy) {
+            JMRLog.warn(LOGGER, "Worker is busy. Rejecting REDUCE task: {}", taskId);
+            responseObserver.onNext(SubmitReduceTaskResponse.newBuilder().setSuccess(false).build());
             responseObserver.onCompleted();
-
-        } catch (JMRException e) {
-            JMRLog.error(LOGGER, "Error in REDUCE task", e);
-            workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.FAILED);
-
-            final SubmitReduceTaskResponse response = SubmitReduceTaskResponse.newBuilder().setSuccess(false).setTaskId(taskId)
-                    .setErrorMessage(e.getMessage()).build();
-
-            responseObserver.onNext(response);
-            responseObserver.onCompleted();
+            return;
         }
+
+        // 2. Accettazione Task
+        this.workerNode.busy = true;
+        workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.RUNNING);
+
+        // 3. Risposta gRPC immediata (ACK)
+        // Nota: executionTimeMs è 0 qui perché il task non è ancora finito. Il master
+        // lo prenderà dallo Status.
+        final SubmitReduceTaskResponse response = SubmitReduceTaskResponse.newBuilder().setSuccess(true).setTaskId(taskId).build();
+        responseObserver.onNext(response);
+        responseObserver.onCompleted();
+
+        // 4. Esecuzione Asincrona
+        CompletableFuture.runAsync(() -> {
+            final long startTime = System.currentTimeMillis();
+            try {
+                JMRLog.info(LOGGER, ">>> Starting ASYNC REDUCE execution: {}", taskId);
+
+                List<Pair<String, Serializable>> reducedData = WorkerExecutor.executeReduce(request, workerNode, workerServer);
+
+                final long executionTime = System.currentTimeMillis() - startTime;
+
+                // Aggiornamento risultati e stato
+                final ReduceTaskResult taskResult = new ReduceTaskResult(jobId, taskId, reducedData, executionTime);
+                workerNode.reduceTaskResults.put(Pair.of(jobId, taskId), taskResult);
+                workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.COMPLETED);
+
+                JMRLog.info(LOGGER, "<<< REDUCE task completed: {} ({}ms)", taskId, executionTime);
+
+            } catch (Exception e) {
+                JMRLog.error(LOGGER, "Error in ASYNC REDUCE task: " + taskId, e);
+                workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.FAILED);
+            } finally {
+                // Rilascia il worker
+                this.workerNode.busy = false;
+            }
+        });
     }
 
     @Override
@@ -235,6 +263,15 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         }
 
         final ReduceTaskResult taskResult = workerNode.reduceTaskResults.get(Pair.of(jobId, taskId));
+
+        // Safety check
+        if (taskResult == null) {
+            JMRLog.error(LOGGER, "Status is COMPLETED but result is missing for reduce task {}", taskId);
+            responseObserver.onNext(it.jmr.grpc.worker.GetReduceTaskStatusResponse.newBuilder().setState(TaskState.TASK_FAILED).build());
+            responseObserver.onCompleted();
+            return;
+        }
+
         final List<it.jmr.grpc.worker.ReducedData> reducedDataList = new ArrayList<>();
         try {
             for (final Pair<String, Serializable> entry : taskResult.getReducedData()) {

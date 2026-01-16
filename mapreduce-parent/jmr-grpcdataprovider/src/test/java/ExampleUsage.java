@@ -8,11 +8,6 @@ import it.jmr.common.providers.DataProviderClient;
 import it.jmr.grpcdataprovider.Container;
 import it.jmr.grpcdataprovider.localgrpc.LocalGrpcDataProvider;
 
-import java.io.*;
-import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.List;
-
 public class ExampleUsage {
 
     // Esempio di classe Serializable per i dati

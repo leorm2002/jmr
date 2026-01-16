@@ -1,19 +1,14 @@
 package it.jmr.worker;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.ObjectInputStream;
 import java.io.Serializable;
+import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-
-import javax.management.JMRuntimeException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,13 +54,11 @@ public class WorkerServer implements IntermediateDataFetcher {
         }
     };
 
-    public WorkerServer(String workerId, int port, String jarStorageDir, String jobStorageDir) {
+    public WorkerServer(String workerId, int port, Path jarStorageDir, Path jobStorageDir) {
 
-        // Create storage directory
-        new File(jarStorageDir).mkdirs();
-
-        // Create job storage directory
-        new File(jobStorageDir).mkdirs();
+        // Create jar/job directory
+        jarStorageDir.toFile().mkdirs();
+        jobStorageDir.toFile().mkdirs();
 
         this.ctx = new WorkerContext(new InMemoryIntermediateStorage(), workerId, jarStorageDir, jobStorageDir, port);
         this.healthStatusManager = new HealthStatusManager();
@@ -90,8 +83,8 @@ public class WorkerServer implements IntermediateDataFetcher {
         LOGGER.info("╚════════════════════════════════════════╝");
         LOGGER.info("Worker ID:    {}", ctx.workerId);
         LOGGER.info("Port:         {}", ctx.port);
-        LOGGER.info("Jar Storage:  {}", new File(ctx.jarStorageDir).getAbsolutePath());
-        LOGGER.info("Job Storage:  {}", new File(ctx.jobStorageDir).getAbsolutePath());
+        LOGGER.info("Jar Storage:  {}", ctx.jarStorageDir.toAbsolutePath().toString());
+        LOGGER.info("Job Storage:  {}", ctx.jobStorageDir.toAbsolutePath().toString());
         LOGGER.info("\nWorker ready to receive tasks...\n");
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {

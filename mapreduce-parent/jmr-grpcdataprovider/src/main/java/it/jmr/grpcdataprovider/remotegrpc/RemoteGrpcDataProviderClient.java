@@ -43,8 +43,8 @@ public class RemoteGrpcDataProviderClient<D extends Serializable> implements Dat
             return; // Già inizializzato
         }
 
-        channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();
         blockingStub = DataProviderServiceGrpc.newBlockingStub(channel);
+        channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();
 
         System.out.println("RemoteGrpcDataProviderClient connected to " + host + ":" + port);
     }
