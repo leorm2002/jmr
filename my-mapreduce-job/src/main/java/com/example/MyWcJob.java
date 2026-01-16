@@ -67,7 +67,7 @@ public class MyWcJob {
         while (true) {
             final String status = jmrClient.getJobStatus();
             System.out.println("Job status: " + status);
-            Thread.sleep(1000); // Attendi 1 secondo prima di controllare di nuovo
+            Thread.sleep(10000); // Attendi 10 secondi prima di controllare di nuovo
 
             if ("COMPLETED".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status)) {
                 break;

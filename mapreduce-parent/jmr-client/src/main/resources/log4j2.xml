@@ -1,4 +1,4 @@
-<Configuration status="DEBUG">
+<Configuration status="TRACE">
     <Appenders>
         <Console name="ConsoleSync" target="SYSTEM_OUT">
             <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n" />

@@ -14,6 +14,7 @@
         <module>jmr-master</module>
         <module>jmr-worker</module>
         <module>jmr-grpcdataprovider</module>
+        <module>jmr-integration-tests</module>
     </modules>
 
     <name>MapReduce Distributed System</name>
@@ -51,6 +52,11 @@
             <dependency>
                 <groupId>it.jmr</groupId>
                 <artifactId>jmr-master</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>it.jmr</groupId>
+                <artifactId>jmr-worker</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <!-- gRPC -->

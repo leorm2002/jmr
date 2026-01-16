@@ -13,6 +13,7 @@ public class JobInfoInternal {
     private String errorMessage = "";
     private long startTime;
     private long endTime;
+    private String jarId;
 
     public String getJobPath() {
         return jobPath;
@@ -22,8 +23,9 @@ public class JobInfoInternal {
         return new JobInfoInternal(jobId);
     }
 
-    public void recievedJarFound(String jarPth) {
+    public void recievedJarFound(String jarPth, String jarId) {
         this.jarPath = jarPth;
+        this.jarId = jarId;
     }
 
     public void recievedJarNotFound() {
@@ -84,6 +86,10 @@ public class JobInfoInternal {
 
     public JobStatus getStatus() {
         return status;
+    }
+
+    public String getJarId() {
+        return jarId;
     }
 
     @Override

@@ -16,15 +16,22 @@ public class WorkerContext {
     public final String workerId;
     public final ConcurrentHashMap<String, String> jarStorage;
     public final ConcurrentHashMap<String, String> jobStorage;
+    public final String jarStorageDir;
+    public final String jobStorageDir;
+    public final int port;
     public final ConcurrentHashMap<Pair<String, String>, WorkerTaskStatus> statusMap;
-    public final ConcurrentHashMap<Pair<String, String>, TaskResult> taskResults = new ConcurrentHashMap<>();
+    public final ConcurrentHashMap<Pair<String, String>, TaskResult> mapTaskResults = new ConcurrentHashMap<>();
+    public final ConcurrentHashMap<Pair<String, String>, ReduceTaskResult> reduceTaskResults = new ConcurrentHashMap<>();
 
-    public WorkerContext(IntermediateStorage intermediateStorage, String workerId) {
+    public WorkerContext(IntermediateStorage intermediateStorage, String workerId, String jarStorageDir, String jobStorageDir, int port) {
         this.intermediateStorage = intermediateStorage;
         this.workerId = workerId;
         this.jarStorage = new ConcurrentHashMap<>();
         this.statusMap = new ConcurrentHashMap<>();
         this.jobStorage = new ConcurrentHashMap<>();
+        this.jarStorageDir = jarStorageDir;
+        this.jobStorageDir = jobStorageDir;
+        this.port = port;
     }
 
 }

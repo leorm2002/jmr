@@ -17,6 +17,7 @@ import it.jmr.common.PartitionInfo;
 import it.jmr.common.WorkerTaskStatus;
 import it.jmr.common.exceptions.JMRException;
 import it.jmr.common.utils.JMRLog;
+import it.jmr.common.utils.JmrUtils;
 import it.jmr.common.utils.Pair;
 import it.jmr.grpc.worker.SubmitMapTaskRequest;
 import it.jmr.grpc.worker.SubmitMapTaskResponse;
@@ -26,25 +27,30 @@ import it.jmr.grpc.worker.TaskState;
 import it.jmr.grpc.worker.FetchIntermediateDataRequest;
 import it.jmr.grpc.worker.GetMapTaskStatusRequest;
 import it.jmr.grpc.worker.GetMapTaskStatusResponse;
+import it.jmr.grpc.worker.GetMapTaskStatusResponseIntermediateDataLocation;
 import it.jmr.grpc.worker.GetWorkerStatusRequest;
 import it.jmr.grpc.worker.GetWorkerStatusResponse;
 import it.jmr.grpc.worker.HeartbeatRequest;
 import it.jmr.grpc.worker.HeartbeatResponse;
 import it.jmr.grpc.worker.IntermediateDataChunk;
 import it.jmr.grpc.worker.IntermediateDataLocation;
+import it.jmr.grpc.worker.ReducedData;
 import it.jmr.grpc.worker.WorkerServiceGrpc;
 import it.jmr.grpc.worker.WorkerState;
 import it.jmr.grpc.worker.WorkerStatus;
 import it.jmr.worker.models.TaskResult;
 import it.jmr.worker.models.WorkerContext;
+import it.jmr.worker.models.ReduceTaskResult;
 
 class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
     private static final Logger LOGGER = LoggerFactory.getLogger(WorkerServiceImpl.class);
 
     private WorkerContext workerNode;
+    private WorkerServer workerServer;
 
-    WorkerServiceImpl(WorkerContext workerNode) {
+    WorkerServiceImpl(WorkerContext workerNode, WorkerServer workerServer) {
         this.workerNode = workerNode;
+        this.workerServer = workerServer;
     }
 
     @Override
@@ -85,12 +91,12 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
             return;
         }
 
-        final TaskResult taskResult = workerNode.taskResults.get(Pair.of(jobId, taskId));
+        final TaskResult taskResult = workerNode.mapTaskResults.get(Pair.of(jobId, taskId));
         final List<PartitionInfo> partitions = taskResult.getPartitions();
-        final List<IntermediateDataLocation> locations = new LinkedList<>();
+        final List<GetMapTaskStatusResponseIntermediateDataLocation> locations = new LinkedList<>();
         for (final PartitionInfo partitionInfo : partitions) {
-            final IntermediateDataLocation loc = IntermediateDataLocation.newBuilder().setWorkerId(workerNode.workerId)
-                    .setTaskId(partitionInfo.getPartitionId()).setPartitionId(partitionInfo.getKey()).build();
+            final GetMapTaskStatusResponseIntermediateDataLocation loc = GetMapTaskStatusResponseIntermediateDataLocation.newBuilder()
+                    .setWorkerId(workerNode.workerId).setTaskId(partitionInfo.getPartitionId()).setPartitionId(partitionInfo.getKey()).build();
             locations.add(loc);
         }
         JMRLog.debug(LOGGER, "Map task {} for job {} is completed", taskId, jobId);
@@ -105,7 +111,7 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         final String jobId = request.getJobId();
         final String taskId = request.getTaskId();
 
-        JMRLog.info(LOGGER, "\n>>> Received MAP task: {} for job: {}", taskId, jobId);
+        JMRLog.info(LOGGER, "\n>>> Received MAP task: {} for job:જી", taskId, jobId);
 
         // If the worker is busy, reject the task
         boolean success;
@@ -157,7 +163,7 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
 
         // Save the task info
         final TaskResult taskResult = new TaskResult(jobId, taskId, partitionInfos, executionTime);
-        workerNode.taskResults.put(Pair.of(jobId, taskId), taskResult);
+        workerNode.mapTaskResults.put(Pair.of(jobId, taskId), taskResult);
     }
 
     @Override
@@ -166,53 +172,87 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         JMRLog.info(LOGGER, "    Partition: {}", request.getPartitionId());
 
         String taskId = request.getTaskId();
+        String jobId = request.getJobId();
 
-        // this.workerNode.taskExecutor.submit(() -> {
-        // try {
-        // long startTime = System.currentTimeMillis();
+        try {
+            final long startTime = System.currentTimeMillis();
+            List<Pair<String, Serializable>> reducedData = WorkerExecutor.executeReduce(request, workerNode, workerServer);
+            final long executionTime = System.currentTimeMillis() - startTime;
 
-        // // Deserialize Reducer
-        // Reducer<?, ?, ?> reducer = this.workerNode.deserialize(
-        // request.getSerializedReducer().toByteArray());
+            // Save the task info
+            final ReduceTaskResult taskResult = new ReduceTaskResult(jobId, taskId, reducedData, executionTime);
+            workerNode.reduceTaskResults.put(Pair.of(jobId, taskId), taskResult);
+            workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.COMPLETED);
 
-        // // Execute Reduce phase
-        // OutputDataLocation outputLocation = executeReducePhase(
-        // taskId,
-        // request.getPartitionId(),
-        // reducer,
-        // request.getLocationsList()
-        // );
+            final SubmitReduceTaskResponse response = SubmitReduceTaskResponse.newBuilder().setSuccess(true).setTaskId(taskId)
+                    .setExecutionTimeMs(executionTime).build();
 
-        // long executionTime = System.currentTimeMillis() - startTime;
+            JMRLog.info(LOGGER, "<<< REDUCE task completed: {} ({}ms)", taskId, executionTime);
 
-        // ExecuteReduceTaskResponse response = ExecuteReduceTaskResponse.newBuilder()
-        // .setSuccess(true)
-        // .setTaskId(taskId)
-        // .setOutputLocation(outputLocation)
-        // .setExecutionTimeMs(executionTime)
-        // .build();
+            responseObserver.onNext(response);
+            responseObserver.onCompleted();
 
-        // JMRLog.info(LOGGER, "<<< REDUCE task completed: {} ({}ms)", taskId, executionTime);
+        } catch (JMRException e) {
+            JMRLog.error(LOGGER, "Error in REDUCE task", e);
+            workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.FAILED);
 
-        // responseObserver.onNext(response);
-        // responseObserver.onCompleted();
+            final SubmitReduceTaskResponse response = SubmitReduceTaskResponse.newBuilder().setSuccess(false).setTaskId(taskId)
+                    .setErrorMessage(e.getMessage()).build();
 
-        // } catch (Exception e) {
-        // JMRLog.error(LOGGER, "Error in REDUCE task", e);
-        // e.printStackTrace();
+            responseObserver.onNext(response);
+            responseObserver.onCompleted();
+        }
+    }
 
-        // ExecuteReduceTaskResponse response = ExecuteReduceTaskResponse.newBuilder()
-        // .setSuccess(false)
-        // .setTaskId(taskId)
-        // .setErrorMessage(e.getMessage())
-        // .build();
+    @Override
+    public void getReduceTaskStatus(it.jmr.grpc.worker.GetReduceTaskStatusRequest request,
+            StreamObserver<it.jmr.grpc.worker.GetReduceTaskStatusResponse> responseObserver) {
+        final String jobId = request.getJobId();
+        final String taskId = request.getTaskId();
+        JMRLog.debug(LOGGER, "Received getReduceTaskStatus request for task {} of job {}", taskId, jobId);
 
-        // responseObserver.onNext(response);
-        // responseObserver.onCompleted();
-        // } finally {
-        // this.workerNode.activeTasks.remove(taskId);
-        // }
-        // });
+        final WorkerTaskStatus status = workerNode.statusMap.getOrDefault(Pair.of(jobId, taskId), WorkerTaskStatus.MISSING);
+
+        if (status == WorkerTaskStatus.MISSING) {
+            responseObserver.onNext(it.jmr.grpc.worker.GetReduceTaskStatusResponse.newBuilder().setState(TaskState.TASK_MISSING).build());
+            responseObserver.onCompleted();
+            JMRLog.warn(LOGGER, "Reduce task {} for job {} is missing", taskId, jobId);
+            return;
+        }
+
+        if (status == WorkerTaskStatus.RUNNING) {
+            responseObserver.onNext(it.jmr.grpc.worker.GetReduceTaskStatusResponse.newBuilder().setState(TaskState.TASK_RUNNING).build());
+            responseObserver.onCompleted();
+            JMRLog.debug(LOGGER, "Reduce task {} for job {} is running", taskId, jobId);
+            return;
+        }
+
+        if (status == WorkerTaskStatus.FAILED) {
+            responseObserver.onNext(it.jmr.grpc.worker.GetReduceTaskStatusResponse.newBuilder().setState(TaskState.TASK_FAILED).build());
+            responseObserver.onCompleted();
+            JMRLog.error(LOGGER, "Reduce task {} for job {} has failed", taskId, jobId);
+            return;
+        }
+
+        final ReduceTaskResult taskResult = workerNode.reduceTaskResults.get(Pair.of(jobId, taskId));
+        final List<it.jmr.grpc.worker.ReducedData> reducedDataList = new ArrayList<>();
+        try {
+            for (final Pair<String, Serializable> entry : taskResult.getReducedData()) {
+                final ReducedData pair = it.jmr.grpc.worker.ReducedData.newBuilder().setKey(entry.getFirst())
+                        .setValue(com.google.protobuf.ByteString.copyFrom(JmrUtils.serializeObject(entry.getSecond()))).build();
+                reducedDataList.add(pair);
+            }
+        } catch (IOException e) {
+            JMRLog.error(LOGGER, "Error serializing reduced data for task {} job {}", taskId, jobId, e);
+            responseObserver.onError(e);
+            return;
+        }
+
+        JMRLog.debug(LOGGER, "Reduce task {} for job {} is completed", taskId, jobId);
+
+        responseObserver.onNext(it.jmr.grpc.worker.GetReduceTaskStatusResponse.newBuilder().setState(TaskState.TASK_COMPLETED)
+                .addAllReducedData(reducedDataList).build());
+        responseObserver.onCompleted();
     }
 
     @Override

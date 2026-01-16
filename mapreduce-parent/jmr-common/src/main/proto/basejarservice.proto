@@ -12,12 +12,12 @@ service JarService {
   rpc UploadJar(stream JarChunk) returns (UploadJarResponse);  
 }
 
-
 // Chunk di dati del JAR per lo streaming
 message JarChunk {
   bytes content = 1;           // Contenuto del chunk
   string jar_name = 2;         // Nome del file JAR
   int64 total_size = 3;        // Dimensione totale (solo nel primo chunk)
+  string jar_id = 4;           // ID del JAR
 }
 
 // Risposta al caricamento del JAR

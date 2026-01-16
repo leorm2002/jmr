@@ -13,6 +13,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
+import javax.management.JMRuntimeException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,29 +28,38 @@ import it.jmr.common.JMRConstants;
 import it.jmr.common.exceptions.JMRException;
 import it.jmr.common.jarservice.JarServiceImpl;
 import it.jmr.common.jarservice.JobServiceImpl;
+import it.jmr.common.jarservice.ResourceUploadedCallback;
 import it.jmr.common.utils.JMRLog;
-import it.jmr.common.utils.Pair;
+import it.jmr.common.utils.JmrUtils;
 import it.jmr.grpc.worker.FetchIntermediateDataRequest;
 import it.jmr.grpc.worker.IntermediateDataChunk;
 import it.jmr.grpc.worker.WorkerServiceGrpc;
 import it.jmr.worker.models.WorkerContext;
 import it.jmr.worker.storage.InMemoryIntermediateStorage;
 
-public class WorkerServer {
+import it.jmr.common.IntermediateDataFetcher;
+
+public class WorkerServer implements IntermediateDataFetcher {
     private static final Logger LOGGER = LoggerFactory.getLogger(WorkerServer.class);
-    private final int port;
     private final Server server;
-    final String storageDir;
     final WorkerContext ctx;
     private HealthStatusManager healthStatusManager;
     private final Map<String, ManagedChannel> channels = new ConcurrentHashMap<>();
     private final Map<String, WorkerServiceGrpc.WorkerServiceBlockingStub> blockingStubs = new ConcurrentHashMap<>();
 
+    private final ResourceUploadedCallback dummyCallback = new ResourceUploadedCallback() {
+        @Override
+        public void onJarUploaded(String jarId, String jarPath) {
+            // Do nothing on the worker side
+        }
+
+        @Override
+        public void onJobUploaded(String jobId, String jobPath) {
+            // Do nothing on the worker side
+        }
+    };
+
     public WorkerServer(String workerId, int port, String jarStorageDir, String jobStorageDir) {
-        this.port = port;
-        this.storageDir = jarStorageDir;
-        this.ctx = new WorkerContext(new InMemoryIntermediateStorage(), workerId);
-        this.healthStatusManager = new HealthStatusManager();
 
         // Create storage directory
         new File(jarStorageDir).mkdirs();
@@ -56,10 +67,15 @@ public class WorkerServer {
         // Create job storage directory
         new File(jobStorageDir).mkdirs();
 
+        this.ctx = new WorkerContext(new InMemoryIntermediateStorage(), workerId, jarStorageDir, jobStorageDir, port);
+        this.healthStatusManager = new HealthStatusManager();
+
         this.server = ServerBuilder.forPort(port)//
-                .addService(new WorkerServiceImpl(ctx))//
-                .addService(new JarServiceImpl(jarStorageDir, ctx.jarStorage))//
-                .addService(new JobServiceImpl(jobStorageDir, ctx.jobStorage))//
+                .addService(new WorkerServiceImpl(ctx, this))
+                // Handles the uploads of JARs to this worker from the master
+                .addService(new JarServiceImpl(jarStorageDir, ctx.jarStorage, dummyCallback))
+                // Handles the uploads of JOBs to this worker from the master
+                .addService(new JobServiceImpl(jobStorageDir, ctx.jobStorage, dummyCallback))//
                 .addService(healthStatusManager.getHealthService()) // Add health service
                 .maxInboundMessageSize(JMRConstants.MAX_INBOUND_MESSAGE_SIZE).build();
 
@@ -73,11 +89,16 @@ public class WorkerServer {
         LOGGER.info("║            jMR   Worker Node           ║");
         LOGGER.info("╚════════════════════════════════════════╝");
         LOGGER.info("Worker ID:    {}", ctx.workerId);
-        LOGGER.info("Port:         {}", port);
-        LOGGER.info("Storage:      {}", new File(storageDir).getAbsolutePath());
+        LOGGER.info("Port:         {}", ctx.port);
+        LOGGER.info("Jar Storage:  {}", new File(ctx.jarStorageDir).getAbsolutePath());
+        LOGGER.info("Job Storage:  {}", new File(ctx.jobStorageDir).getAbsolutePath());
         LOGGER.info("\nWorker ready to receive tasks...\n");
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+
+            LOGGER.info("\nDeleting files...");
+            JmrUtils.deleteFolder(ctx.jarStorageDir);
+            JmrUtils.deleteFolder(ctx.jobStorageDir);
             LOGGER.info("\nShutting down worker...");
             WorkerServer.this.stop();
         }));
@@ -123,28 +144,21 @@ public class WorkerServer {
         });
     }
 
+    @Override
     @SuppressWarnings("unchecked")
-    private <KEY extends Serializable, VALUE extends Serializable> List<Pair<KEY, VALUE>> fetchIntermediateDataFromWorker(String workerId,
-            String host, int port, String taskId, int partitionId) throws JMRException {
+    public <VALUE extends Serializable> List<VALUE> fetchIntermediateData(String workerId, String host, int port, String taskId, String partitionId)
+            throws JMRException {
 
         // If it's this worker, read directly from disk
         if (workerId.equals(this.ctx.workerId)) {
             JMRLog.debug(LOGGER, "Fetching intermediate data locally for task {} partition {}", taskId, partitionId);
-            String filePath = storageDir + "/map_" + taskId + "_part_" + partitionId + ".dat";
-            try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(filePath))) {
-                return (List<Pair<KEY, VALUE>>) ois.readObject();
-            } catch (IOException | ClassNotFoundException e) {
-                throw new JMRException("Error fetching local intermediate data", e);
-            }
+            return (List<VALUE>) (List<?>) this.ctx.intermediateStorage.getPartitionData(taskId, partitionId);
         }
 
         // Otherwise, fetch via gRPC
         JMRLog.debug(LOGGER, "Fetching intermediate data from remote worker {}:{} for task {} partition {}", host, port, taskId, partitionId);
         WorkerServiceGrpc.WorkerServiceBlockingStub stub = getOrCreateBlockingStub(host, port);
-        FetchIntermediateDataRequest request = FetchIntermediateDataRequest.newBuilder()
-                .setTaskId(taskId)
-                .setPartitionId(String.valueOf(partitionId)) // partitionId is int in Java, string in proto
-                .build();
+        FetchIntermediateDataRequest request = FetchIntermediateDataRequest.newBuilder().setTaskId(taskId).setPartitionId(partitionId).build();
 
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             Iterator<IntermediateDataChunk> chunks = stub.fetchIntermediateData(request);
@@ -152,16 +166,9 @@ public class WorkerServer {
                 IntermediateDataChunk chunk = chunks.next();
                 baos.write(chunk.getData().toByteArray());
             }
-            return deserialize(baos.toByteArray());
+            return JmrUtils.deserialize(baos.toByteArray());
         } catch (IOException | ClassNotFoundException e) {
             throw new JMRException("Error fetching remote intermediate data", e);
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    <T> T deserialize(byte[] data) throws IOException, ClassNotFoundException {
-        try (ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(data))) {
-            return (T) ois.readObject();
         }
     }
 

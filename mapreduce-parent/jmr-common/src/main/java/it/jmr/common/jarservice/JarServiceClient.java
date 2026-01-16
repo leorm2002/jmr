@@ -23,9 +23,23 @@ public class JarServiceClient {
     private static final org.slf4j.Logger LOGGER = LoggerFactory.getLogger(JarServiceClient.class);
 
     /**
-     * Uploads a JAR to the master
+     * Uploads a JAR (server assigns ID)
      */
     public static String uploadJar(String jarPath, JarServiceGrpc.JarServiceStub jarAsyncStub) throws JMRException, InterruptedException {
+        return uploadJar(jarPath, null, jarAsyncStub);
+    }
+
+    /**
+     * Uploads a JAR with a specific ID (used by master to distribute with
+     * consistent ID)
+     * 
+     * @param jarPath      Path to the JAR file
+     * @param jarId        ID to use for the JAR (if null, server generates one)
+     * @param jarAsyncStub gRPC stub
+     * @return The JAR ID
+     */
+    public static String uploadJar(String jarPath, String jarId, JarServiceGrpc.JarServiceStub jarAsyncStub)
+            throws JMRException, InterruptedException {
 
         File jarFile = new File(jarPath);
         if (!jarFile.exists()) {
@@ -33,14 +47,14 @@ public class JarServiceClient {
         }
 
         final CountDownLatch finishLatch = new CountDownLatch(1);
-        final AtomicReference<String> jarId = new AtomicReference<>();
+        final AtomicReference<String> returnedJarId = new AtomicReference<>();
         final AtomicReference<Exception> exception = new AtomicReference<>();
 
         StreamObserver<JarChunk> requestObserver = jarAsyncStub.uploadJar(new StreamObserver<UploadJarResponse>() {
             @Override
             public void onNext(UploadJarResponse response) {
                 if (response.getSuccess()) {
-                    jarId.set(response.getJarId());
+                    returnedJarId.set(response.getJarId());
                     JMRLog.info(LOGGER, "JAR uploaded successfully - ID: {}", response.getJarId());
                 } else {
                     exception.set(new JMRException(response.getMessage()));
@@ -69,7 +83,7 @@ public class JarServiceClient {
             long totalSize = jarFile.length();
             long uploadedBytes = 0;
 
-            JMRLog.info(LOGGER, "Starting JAR upload: {} ({} bytes)", jarFile.getName(), totalSize);
+            JMRLog.info(LOGGER, "Starting JAR upload: {} ({} bytes){}", jarFile.getName(), totalSize, jarId != null ? " with ID: " + jarId : "");
 
             while ((bytesRead = fis.read(buffer)) != -1) {
                 JarChunk.Builder chunkBuilder = JarChunk.newBuilder().setContent(ByteString.copyFrom(buffer, 0, bytesRead))
@@ -77,6 +91,9 @@ public class JarServiceClient {
 
                 if (firstChunk) {
                     chunkBuilder.setTotalSize(totalSize);
+                    if (jarId != null) {
+                        chunkBuilder.setJarId(jarId);
+                    }
                     firstChunk = false;
                 }
 
@@ -105,11 +122,11 @@ public class JarServiceClient {
             throw new JMRException(exception.get().getMessage(), exception.get());
         }
 
-        if (jarId.get() == null) {
+        if (returnedJarId.get() == null) {
             JMRLog.error(LOGGER, "Upload completed but no JAR ID received");
             throw new JMRException("No JAR ID received from server");
         }
 
-        return jarId.get();
+        return returnedJarId.get();
     }
 }

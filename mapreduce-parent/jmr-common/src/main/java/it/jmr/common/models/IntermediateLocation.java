@@ -4,11 +4,15 @@ public class IntermediateLocation {
     private String workerId;
     private String taskId;
     private String partitionId;
+    private String host;
+    private int port;
 
-    public IntermediateLocation(String workerId, String taskId, String partitionId) {
+    public IntermediateLocation(String workerId, String taskId, String partitionId, String host, int port) {
         this.workerId = workerId;
         this.taskId = taskId;
         this.partitionId = partitionId;
+        this.host = host;
+        this.port = port;
     }
 
     public String getWorkerId() {
@@ -33,6 +37,22 @@ public class IntermediateLocation {
 
     public void setPartitionId(String partitionId) {
         this.partitionId = partitionId;
+    }
+
+    public String getHost() {
+        return host;
+    }
+
+    public void setHost(String host) {
+        this.host = host;
+    }
+
+    public int getPort() {
+        return port;
+    }
+
+    public void setPort(int port) {
+        this.port = port;
     }
 
 }

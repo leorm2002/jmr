@@ -3,7 +3,6 @@ package it.jmr.master;
 import java.util.ArrayList;
 import java.util.List;
 
-import it.jmr.client.JMRClient;
 import it.jmr.common.JMRConstants;
 import it.jmr.common.utils.JMRLog;
 import it.jmr.common.utils.JmrUtils;

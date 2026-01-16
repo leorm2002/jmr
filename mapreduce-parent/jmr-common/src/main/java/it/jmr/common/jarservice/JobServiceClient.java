@@ -2,8 +2,9 @@ package it.jmr.common.jarservice;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.util.concurrent.CountDownLatch;
@@ -27,13 +28,20 @@ import it.jmr.grpc.UploadJobResponse;
 public class JobServiceClient {
     private static final Logger LOGGER = LoggerFactory.getLogger(JobServiceClient.class);
 
-    public static <D extends Serializable, V extends Serializable, O extends Serializable> String uploadJob(JobConfiguration<D, V, O> jobConfig,
-            JobServiceGrpc.JobServiceStub jobAsyncStub) throws JMRException, InterruptedException {
-        return uploadJob(jobConfig, null, jobAsyncStub);
+    public static class JobUploadResult {
+        private final String jobId;
+
+        public JobUploadResult(String jobId) {
+            this.jobId = jobId;
+        }
+
+        public String getJobId() {
+            return jobId;
+        }
     }
 
-    public static <D extends Serializable, V extends Serializable, O extends Serializable> String uploadJob(JobConfiguration<D, V, O> jobConfig,
-            String jobId, JobServiceGrpc.JobServiceStub jobAsyncStub) throws JMRException, InterruptedException {
+    public static <D extends Serializable, V extends Serializable, O extends Serializable> JobUploadResult serializeAndUploadJob(
+            JobConfiguration<D, V, O> jobConfig, JobServiceGrpc.JobServiceStub jobAsyncStub) throws JMRException, InterruptedException {
 
         final CountDownLatch finishLatch = new CountDownLatch(1);
         final AtomicReference<String> returnedJobId = new AtomicReference<>();
@@ -80,9 +88,6 @@ public class JobServiceClient {
 
                 while ((bytesRead = inputStream.read(buffer)) != -1) {
                     var b = JobChunk.newBuilder().setContent(ByteString.copyFrom(buffer, 0, bytesRead));
-                    if (jobId != null) {
-                        b.setJobId(jobId);
-                    }
                     JobChunk chunk = b.build();
 
                     requestObserver.onNext(chunk);
@@ -118,6 +123,84 @@ public class JobServiceClient {
             throw new JMRException("No Job ID received from server");
         }
 
-        return returnedJobId.get();
+        return new JobUploadResult(returnedJobId.get());
+    }
+
+    /**
+     * Uploads a job from a file (raw bytes) to a worker without deserializing. This
+     * is used by the master to forward job files to workers.
+     */
+    public static JobUploadResult uploadJobFromFile(String jobFilePath, String jobId, JobServiceGrpc.JobServiceStub jobAsyncStub)
+            throws JMRException, InterruptedException {
+
+        File jobFile = new File(jobFilePath);
+        if (!jobFile.exists()) {
+            throw new JMRException("Job file not found: " + jobFilePath);
+        }
+
+        final CountDownLatch finishLatch = new CountDownLatch(1);
+        final AtomicReference<Exception> exception = new AtomicReference<>();
+
+        StreamObserver<UploadJobResponse> responseObserver = new StreamObserver<>() {
+            @Override
+            public void onNext(UploadJobResponse response) {
+                JMRLog.info(LOGGER, "Job file uploaded successfully - ID: {} - {}", response.getJobId(), response.getMessage());
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                exception.set(new JMRException("Error during job file upload", t));
+                JMRLog.error(LOGGER, "Error during job file upload: {}", t.getMessage(), t);
+                finishLatch.countDown();
+            }
+
+            @Override
+            public void onCompleted() {
+                JMRLog.debug(LOGGER, "Job file upload completed");
+                finishLatch.countDown();
+            }
+        };
+
+        StreamObserver<JobChunk> requestObserver = jobAsyncStub.uploadJob(responseObserver);
+
+        try (FileInputStream fis = new FileInputStream(jobFile)) {
+            byte[] buffer = new byte[JMRConstants.UPLOAD_CHUNK_SIZE];
+            int bytesRead;
+            long totalSize = jobFile.length();
+            long uploadedBytes = 0;
+
+            JMRLog.info(LOGGER, "Starting job file upload: {} ({} bytes)", jobFile.getName(), totalSize);
+
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                JobChunk chunk = JobChunk.newBuilder().setContent(ByteString.copyFrom(buffer, 0, bytesRead)).setJobId(jobId).build();
+
+                requestObserver.onNext(chunk);
+                uploadedBytes += bytesRead;
+
+                int percentage = (int) ((uploadedBytes * 100) / totalSize);
+                if (percentage % 25 == 0 || uploadedBytes == totalSize) {
+                    JMRLog.debug(LOGGER, "Job file upload progress: {}%", percentage);
+                }
+            }
+
+            requestObserver.onCompleted();
+            JMRLog.info(LOGGER, "Job file upload complete, waiting for confirmation...");
+
+        } catch (IOException e) {
+            JMRLog.error(LOGGER, "Error reading job file: {}", e.getMessage(), e);
+            requestObserver.onError(e);
+            throw new JMRException("Error during job file upload", e);
+        }
+
+        if (!finishLatch.await(JMRConstants.JOB_UPLOAD_TIMEOUT_M, TimeUnit.MINUTES)) {
+            JMRLog.error(LOGGER, "Timeout during job file upload after {} minute(s)", JMRConstants.JOB_UPLOAD_TIMEOUT_M);
+            throw new JMRException("Timeout during job file upload");
+        }
+
+        if (exception.get() != null) {
+            throw new JMRException(exception.get().getMessage(), exception.get());
+        }
+
+        return new JobUploadResult(jobId);
     }
 }

@@ -60,7 +60,13 @@ message GetMapTaskStatusRequest {
 
 message GetMapTaskStatusResponse {
   TaskState state = 1;
-  repeated IntermediateDataLocation locations = 2;
+  repeated GetMapTaskStatusResponseIntermediateDataLocation locations = 2;
+}
+
+message GetMapTaskStatusResponseIntermediateDataLocation {
+  string worker_id = 1;
+  string task_id = 2;
+  string partition_id = 3;
 }
 
 // Task Map
@@ -96,7 +102,7 @@ message PartitionInfo {
 message SubmitReduceTaskRequest {
   string task_id = 1;
   string job_id = 2;
-  int32 partition_id = 3;
+  string partition_id = 3;
   string jar_id = 4;                                // Jar da dove recuperare la classe
   repeated IntermediateDataLocation locations = 5;  // Dove recuperare i dati intermedi
 }
@@ -105,6 +111,8 @@ message IntermediateDataLocation {
   string worker_id = 1;
   string task_id = 2;
   string partition_id = 3;
+  string host = 4;
+  int32 port = 5;
 }
 
 message SubmitReduceTaskResponse {
@@ -161,5 +169,10 @@ message GetReduceTaskStatusRequest {
 
 message GetReduceTaskStatusResponse {
   TaskState state = 1;
-  repeated IntermediateDataLocation locations = 2;
+  repeated ReducedData reduced_data = 2;
+}
+
+message ReducedData {
+  string key = 1;
+  bytes value = 2;
 }

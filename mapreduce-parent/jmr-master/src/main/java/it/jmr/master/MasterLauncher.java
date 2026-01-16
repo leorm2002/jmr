@@ -27,6 +27,9 @@ public class MasterLauncher {
     @Parameter(names = { "--jobStorageDirectory", "-josd" }, required = true, description = "The directory where job files will be stored")
     private String jobStorageDirectory;
 
+    @Parameter(names = { "--timeoutSeconds", "-ts" }, description = "The timeout in seconds for network operations (default: 5 seconds)")
+    private int timeoutSeconds = 5;
+
     public static void main(String[] args) throws JMRException {
 
         // 1. Parse command line arguments
@@ -45,7 +48,7 @@ public class MasterLauncher {
         LOGGER.info("Discovering workers on the network...");
         try {
             DiscoveryService discovery = new DiscoveryService("_jmr._tcp.local.");
-            List<ServiceInfo> found = discovery.discover(2);
+            List<ServiceInfo> found = discovery.discover(app.timeoutSeconds);
 
             // 3. Start the master server
 
@@ -66,7 +69,7 @@ public class MasterLauncher {
                 }
             }
 
-            try (MapReduceMasterServer master = new MapReduceMasterServer(port, workers, jarStorageDirectory, jobStorageDirectory)) {
+            try (MasterServer master = new MasterServer(port, workers, jarStorageDirectory, jobStorageDirectory)) {
                 master.start();
                 master.blockUntilShutdown();
             }

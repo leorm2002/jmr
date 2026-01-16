@@ -52,4 +52,9 @@ public class Pair<K, V> implements java.io.Serializable {
             return false;
         return true;
     }
+
+    @Override
+    public String toString() {
+        return first + ":" + second;
+    }
 }

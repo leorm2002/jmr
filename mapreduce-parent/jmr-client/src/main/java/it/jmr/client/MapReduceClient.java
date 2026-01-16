@@ -43,7 +43,7 @@ public class MapReduceClient implements AutoCloseable {
             throws JMRException {
         try {
             LOGGER.info("Uploading job configuration");
-            return JobServiceClient.uploadJob(jobConfig, jobAsyncStub);
+            return JobServiceClient.serializeAndUploadJob(jobConfig, jobAsyncStub).getJobId();
         } catch (JMRException | InterruptedException e) {
             throw new JMRException("Failed to upload job", e);
         }

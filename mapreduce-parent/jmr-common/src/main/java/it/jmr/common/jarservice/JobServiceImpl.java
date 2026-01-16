@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
@@ -13,18 +12,22 @@ import org.slf4j.LoggerFactory;
 
 import io.grpc.stub.StreamObserver;
 import it.jmr.common.exceptions.JMRException;
+import it.jmr.common.utils.JmrUtils;
 import it.jmr.grpc.JobChunk;
 import it.jmr.grpc.JobServiceGrpc;
 import it.jmr.grpc.UploadJobResponse;
+// Removed import it.jmr.master.MasterContext; // Added import
 
 public class JobServiceImpl extends JobServiceGrpc.JobServiceImplBase {
     private static final Logger LOGGER = LoggerFactory.getLogger(JobServiceImpl.class);
     private ConcurrentHashMap<String, String> jobStorage;
     private String jobStorageDir;
+    private final ResourceUploadedCallback callback; // Added field
 
-    public JobServiceImpl(String jobStorageDir, ConcurrentHashMap<String, String> jobStorage) {
+    public JobServiceImpl(String jobStorageDir, ConcurrentHashMap<String, String> jobStorage, ResourceUploadedCallback callback) {
         this.jobStorageDir = jobStorageDir;
         this.jobStorage = jobStorage;
+        this.callback = callback;
     }
 
     @Override
@@ -57,13 +60,14 @@ public class JobServiceImpl extends JobServiceGrpc.JobServiceImplBase {
             public void onCompleted() {
                 try {
                     final byte[] fileData = outputStream.toByteArray();
-                    final String filename = jobId == null || jobId.isEmpty() ? UUID.randomUUID().toString() : jobId;
+                    final String filename = JmrUtils.isEmpty(jobId) ? JmrUtils.generateJobId() : jobId;
                     final Path filepath = Paths.get(jobStorageDir, filename);
 
                     jobStorage.put(filename, filepath.toString());
                     // Save the file to disk
                     Files.write(filepath, fileData);
                     LOGGER.info("Job file saved to {}", filepath);
+                    callback.onJobUploaded(filename, filepath.toString()); // Invoke callback
 
                     // Respond to the client
                     final UploadJobResponse response = UploadJobResponse.newBuilder().setSuccess(true).setMessage("File uploaded via streaming")

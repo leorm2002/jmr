@@ -12,7 +12,6 @@ service JobService {
   rpc uploadJob(stream JobChunk) returns (UploadJobResponse);  
 }
 
-
 // Chunk di dati del JOB per lo streaming
 message JobChunk {
   bytes content = 1;           // Contenuto del chunk

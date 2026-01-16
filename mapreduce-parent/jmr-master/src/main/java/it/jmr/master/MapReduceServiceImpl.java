@@ -28,26 +28,26 @@ class MapReduceServiceImpl extends MapReduceServiceGrpc.MapReduceServiceImplBase
 
     @Override
     public void submitJob(SubmitJobRequest request, StreamObserver<SubmitJobResponse> responseObserver) {
-        LOGGER.info("Received job submission request for jarId: {} and jobId: {}", request.getJarId(), request.getJobId());
+        final String jarId = request.getJarId();
+        final String jobId = request.getJobId();
+        LOGGER.info("Received job submission request for jarId: {} and jobId: {}", jarId, jobId);
 
-        final JobInfoInternal jobInfo = JobInfoInternal.recievedJob(request.getJobId());
+        final JobInfoInternal jobInfo = JobInfoInternal.recievedJob(jobId);
         this.jobs.put(jobInfo.getJobId(), jobInfo);
 
-        final String jarPath = this.jarsPaths.get(request.getJarId());
+        final String jarPath = this.jarsPaths.get(jarId);
 
         if (jarPath == null) {
             jobInfo.recievedJarNotFound();
-            LOGGER.error("JAR not found: {}", request.getJarId());
-            final SubmitJobResponse response = SubmitJobResponse.newBuilder().setSuccess(false).setMessage("JAR not found: " + request.getJarId())
-                    .build();
+            LOGGER.error("JAR not found: {}", jarId);
+            final SubmitJobResponse response = SubmitJobResponse.newBuilder().setSuccess(false).setMessage("JAR not found: " + jarId).build();
             responseObserver.onNext(response);
             responseObserver.onCompleted();
             return;
         }
-        jobInfo.recievedJarFound(jarPath);
+        jobInfo.recievedJarFound(jarPath, jarId);
         LOGGER.debug("JAR found for job {}: {}", jobInfo.getJobId(), jarPath);
 
-        final String jobId = request.getJobId();
         final String jobPath = this.jobsPaths.get(jobId);
         if (jobPath == null) {
             jobInfo.recievedSerializedJobNotFound();
@@ -62,8 +62,7 @@ class MapReduceServiceImpl extends MapReduceServiceGrpc.MapReduceServiceImplBase
 
         LOGGER.info("Job received: {}", jobInfo.toString());
 
-        SubmitJobResponse response = SubmitJobResponse.newBuilder().setSuccess(true).setJobId(jobId).setMessage("Job submitted successfully")
-                .build();
+        SubmitJobResponse response = SubmitJobResponse.newBuilder().setSuccess(true).setJobId(jobId).setMessage("Job submitted successfully").build();
 
         responseObserver.onNext(response);
         responseObserver.onCompleted();

@@ -1,5 +1,6 @@
 package it.jmr.master.models;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
@@ -17,6 +18,7 @@ import it.jmr.common.jarservice.JobServiceClient;
 import it.jmr.common.models.IntermediateLocation;
 import it.jmr.common.models.JobConfiguration;
 import it.jmr.common.utils.JMRLog;
+import it.jmr.common.utils.JmrUtils;
 import it.jmr.common.utils.Pair;
 import it.jmr.grpc.JarServiceGrpc;
 import it.jmr.grpc.JobServiceGrpc;
@@ -63,6 +65,14 @@ public class Worker {
         return workerId;
     }
 
+    public JarServiceGrpc.JarServiceStub getJarAsyncStub() {
+        return jarAsyncStub;
+    }
+
+    public JobServiceGrpc.JobServiceStub getJobAsyncStub() {
+        return jobAsyncStub;
+    }
+
     public boolean isAlive() {
         return isServerAlive(JMRConstants.HEALTH_SERVICE_NAME);
     }
@@ -89,21 +99,15 @@ public class Worker {
     }
 
     public <D extends Serializable, V extends Serializable, O extends Serializable> boolean submitMapTask(String jobId, String taskId, int offset,
-            int limit, String jarPath, JobConfiguration<D, V, O> jobConfig) {
+            int limit, String jarId, JobConfiguration<D, V, O> jobConfig) {
         try {
             JMRLog.info(LOGGER, "Submitting map task {} for job {} to worker {}", taskId, jobId, workerId);
-            // 1. upload the jar to the worker
-            final String jarId = JarServiceClient.uploadJar(jarPath, jarAsyncStub);
-            JMRLog.debug(LOGGER, "Uploaded jar {} to worker {}", jarId, workerId);
-            // 2. send the serialized job
-            JobServiceClient.uploadJob(jobConfig, jobId, jobAsyncStub);
-            JMRLog.debug(LOGGER, "Uploaded job {} to worker {}", jobId, workerId);
 
             // 3. send the submit
             final it.jmr.grpc.worker.SubmitMapTaskRequest request = it.jmr.grpc.worker.SubmitMapTaskRequest.newBuilder().setTaskId(taskId)
                     .setJobId(jobId).setOffset(offset).setLimit(limit).setJarId(jarId).build();
             final SubmitMapTaskResponse response = stub.submitMapTask(request);
-            if(response.getSuccess()) {
+            if (response.getSuccess()) {
                 JMRLog.info(LOGGER, "Map task {} for job {} submitted successfully to worker {}", taskId, jobId, workerId);
             } else {
                 JMRLog.error(LOGGER, "Failed to submit map task {} for job {} to worker {}", taskId, jobId, workerId);
@@ -126,8 +130,10 @@ public class Worker {
                 return Pair.of(WorkerTaskStatus.RUNNING, Collections.emptyList());
             case TASK_COMPLETED:
                 JMRLog.debug(LOGGER, "Map task {} of job {} completed on worker {}", taskId, jobId, workerId);
-                return Pair.of(WorkerTaskStatus.COMPLETED, response.getLocationsList().stream()
-                        .map(loc -> new IntermediateLocation(loc.getWorkerId(), loc.getTaskId(), loc.getPartitionId())).toList());
+                return Pair.of(WorkerTaskStatus.COMPLETED,
+                        response.getLocationsList().stream()
+                                .map(loc -> new IntermediateLocation(this.workerId, loc.getTaskId(), loc.getPartitionId(), this.address, this.port))
+                                .toList());
             case TASK_MISSING:
                 JMRLog.warn(LOGGER, "Map task {} of job {} is missing on worker {}", taskId, jobId, workerId);
                 return Pair.of(WorkerTaskStatus.MISSING, Collections.emptyList());
@@ -137,6 +143,65 @@ public class Worker {
             }
         } catch (Exception e) {
             JMRLog.error(LOGGER, "Error getting status for map task {} of job {} from worker {}: {}", taskId, jobId, workerId, e.getMessage());
+            return Pair.of(WorkerTaskStatus.FAILED, Collections.emptyList());
+        }
+    }
+
+    public <D extends Serializable, V extends Serializable, O extends Serializable> boolean submitReduceTask(String jobId, String taskId,
+            String jarId, String partitionId, List<it.jmr.grpc.worker.IntermediateDataLocation> locations, JobConfiguration<D, V, O> jobConfig) {
+        try {
+
+            JMRLog.info(LOGGER, "Submitting map task {} for job {} to worker {}", taskId, jobId, workerId);
+
+            JMRLog.info(LOGGER, "Submitting reduce task {} for job {} to worker {}", taskId, jobId, workerId);
+            final it.jmr.grpc.worker.SubmitReduceTaskRequest request = it.jmr.grpc.worker.SubmitReduceTaskRequest.newBuilder().setJobId(jobId)
+                    .setTaskId(taskId).setJarId(jarId).setPartitionId(partitionId).addAllLocations(locations).build();
+            final it.jmr.grpc.worker.SubmitReduceTaskResponse response = stub.submitReduceTask(request);
+            if (response.getSuccess()) {
+                JMRLog.info(LOGGER, "Reduce task {} for job {} submitted successfully to worker {}", taskId, jobId, workerId);
+            } else {
+                JMRLog.error(LOGGER, "Failed to submit reduce task {} for job {} to worker {}: {}", taskId, jobId, workerId,
+                        response.getErrorMessage());
+            }
+            return response.getSuccess();
+        } catch (Exception e) {
+            JMRLog.error(LOGGER, "Error submitting reduce task {} for job {} to worker {}: {}", taskId, jobId, workerId, e.getMessage());
+            return false;
+        }
+    }
+
+    public <O extends Serializable> Pair<WorkerTaskStatus, List<Pair<String, O>>> getReduceTaskStatus(String jobId, String taskId) {
+        try {
+            JMRLog.debug(LOGGER, "Getting status for reduce task {} of job {} from worker {}", taskId, jobId, workerId);
+            final it.jmr.grpc.worker.GetReduceTaskStatusRequest request = it.jmr.grpc.worker.GetReduceTaskStatusRequest.newBuilder().setJobId(jobId)
+                    .setTaskId(taskId).build();
+            final it.jmr.grpc.worker.GetReduceTaskStatusResponse response = stub.getReduceTaskStatus(request);
+
+            switch (response.getState()) {
+            case TASK_RUNNING:
+                return Pair.of(WorkerTaskStatus.RUNNING, Collections.emptyList());
+            case TASK_COMPLETED:
+                JMRLog.debug(LOGGER, "Reduce task {} of job {} completed on worker {}", taskId, jobId, workerId);
+                final List<Pair<String, O>> reducedData = response.getReducedDataList().stream().map(data -> {
+                    try {
+                        O value = JmrUtils.deserialize(data.getValue().toByteArray());
+                        return Pair.of(data.getKey(), value);
+                    } catch (IOException | ClassNotFoundException e) {
+                        JMRLog.error(LOGGER, "Error deserializing reduced data for key {}: {}", data.getKey(), e.getMessage());
+                        return null;
+                    }
+                }).filter(pair -> pair != null).toList();
+
+                return Pair.of(WorkerTaskStatus.COMPLETED, reducedData);
+            case TASK_MISSING:
+                JMRLog.warn(LOGGER, "Reduce task {} of job {} is missing on worker {}", taskId, jobId, workerId);
+                return Pair.of(WorkerTaskStatus.MISSING, Collections.emptyList());
+            default:
+                JMRLog.error(LOGGER, "Reduce task {} of job {} on worker {} has failed", taskId, jobId, workerId);
+                return Pair.of(WorkerTaskStatus.FAILED, Collections.emptyList());
+            }
+        } catch (Exception e) {
+            JMRLog.error(LOGGER, "Error getting status for reduce task {} of job {} from worker {}: {}", taskId, jobId, workerId, e.getMessage());
             return Pair.of(WorkerTaskStatus.FAILED, Collections.emptyList());
         }
     }

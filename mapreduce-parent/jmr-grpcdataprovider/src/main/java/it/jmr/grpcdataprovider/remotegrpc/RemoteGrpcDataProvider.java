@@ -1,6 +1,5 @@
 package it.jmr.grpcdataprovider.remotegrpc;
 
-import java.io.IOException;
 import java.io.Serializable;
 
 import it.jmr.common.exceptions.JMRException;

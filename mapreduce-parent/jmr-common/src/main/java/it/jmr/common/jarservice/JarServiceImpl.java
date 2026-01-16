@@ -6,14 +6,18 @@ import java.io.IOException;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+import javax.management.JMRuntimeException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.grpc.stub.StreamObserver;
 import it.jmr.common.exceptions.JMRException;
+import it.jmr.common.utils.JmrUtils;
 import it.jmr.grpc.JarChunk;
 import it.jmr.grpc.JarServiceGrpc;
 import it.jmr.grpc.UploadJarResponse;
+// Removed import it.jmr.master.MasterContext; // Added import
 
 public class JarServiceImpl extends JarServiceGrpc.JarServiceImplBase {
 
@@ -21,10 +25,12 @@ public class JarServiceImpl extends JarServiceGrpc.JarServiceImplBase {
 
     private final ConcurrentHashMap<String, String> jarStorage;
     private final String jarStorageDir;
+    private final ResourceUploadedCallback callback; // Added field
 
-    public JarServiceImpl(String jarStorageDir, ConcurrentHashMap<String, String> jarStorage) {
+    public JarServiceImpl(String jarStorageDir, ConcurrentHashMap<String, String> jarStorage, ResourceUploadedCallback callback) {
         this.jarStorageDir = jarStorageDir;
         this.jarStorage = jarStorage;
+        this.callback = callback;
     }
 
     @Override
@@ -41,11 +47,13 @@ public class JarServiceImpl extends JarServiceGrpc.JarServiceImplBase {
                 try {
                     if (fos == null) {
                         // First chunk - initialize
-                        jarId = UUID.randomUUID().toString();
+                        // Use provided jar_id if present, otherwise generate a new one
+                        String providedId = chunk.getJarId();
+                        jarId = JmrUtils.isEmpty(providedId) ? JmrUtils.generateJarId() : providedId;
                         jarPath = jarStorageDir + "/" + jarId + ".jar";
                         totalSize = chunk.getTotalSize();
                         fos = new FileOutputStream(jarPath);
-                        LOGGER.info("Receiving JAR: {} ({} bytes)", chunk.getJarName(), totalSize);
+                        LOGGER.info("Receiving JAR: {} ({} bytes) with ID: {}", chunk.getJarName(), totalSize, jarId);
                     }
 
                     chunk.getContent().writeTo(fos);
@@ -73,6 +81,7 @@ public class JarServiceImpl extends JarServiceGrpc.JarServiceImplBase {
 
                     jarStorage.put(jarId, jarPath);
                     LOGGER.info("JAR uploaded: {} (ID: {})", jarPath, jarId);
+                    callback.onJarUploaded(jarId, jarPath); // Invoke callback
 
                     UploadJarResponse response = UploadJarResponse.newBuilder().setSuccess(true).setJarId(jarId)
                             .setMessage("JAR uploaded successfully").build();
