@@ -9,6 +9,7 @@ import it.jmr.common.models.JobConfiguration;
 import it.jmr.grpc.*;
 
 import java.io.Serializable;
+import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
@@ -30,7 +31,7 @@ public class MapReduceClient implements AutoCloseable {
         this.jobAsyncStub = JobServiceGrpc.newStub(channel);
     }
 
-    public String uploadJar(String jarPath) throws JMRException {
+    public String uploadJar(Path jarPath) throws JMRException {
         try {
             LOGGER.info("Uploading jar: {}", jarPath);
             return JarServiceClient.uploadJar(jarPath, jarAsyncStub);

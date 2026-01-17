@@ -3,6 +3,7 @@ package it.jmr.common.jarservice;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -25,7 +26,7 @@ public class JarServiceClient {
     /**
      * Uploads a JAR (server assigns ID)
      */
-    public static String uploadJar(String jarPath, JarServiceGrpc.JarServiceStub jarAsyncStub) throws JMRException, InterruptedException {
+    public static String uploadJar(Path jarPath, JarServiceGrpc.JarServiceStub jarAsyncStub) throws JMRException, InterruptedException {
         return uploadJar(jarPath, null, jarAsyncStub);
     }
 
@@ -38,10 +39,9 @@ public class JarServiceClient {
      * @param jarAsyncStub gRPC stub
      * @return The JAR ID
      */
-    public static String uploadJar(String jarPath, String jarId, JarServiceGrpc.JarServiceStub jarAsyncStub)
-            throws JMRException, InterruptedException {
+    public static String uploadJar(Path jarPath, String jarId, JarServiceGrpc.JarServiceStub jarAsyncStub) throws JMRException, InterruptedException {
 
-        File jarFile = new File(jarPath);
+        File jarFile = jarPath.toFile();
         if (!jarFile.exists()) {
             throw new JMRException("JAR file not found: " + jarPath);
         }

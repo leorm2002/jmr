@@ -44,12 +44,12 @@ public class WorkerServer implements IntermediateDataFetcher {
 
     private final ResourceUploadedCallback dummyCallback = new ResourceUploadedCallback() {
         @Override
-        public void onJarUploaded(String jarId, String jarPath) {
+        public void onJarUploaded(String jarId, Path jarPath) {
             // Do nothing on the worker side
         }
 
         @Override
-        public void onJobUploaded(String jobId, String jobPath) {
+        public void onJobUploaded(String jobId, Path jobPath) {
             // Do nothing on the worker side
         }
     };

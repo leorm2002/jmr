@@ -1,6 +1,7 @@
 package it.jmr.worker;
 
 import java.io.Serializable;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -36,8 +37,8 @@ public class WorkerExecutor {
         LOGGER.info("Executing reduce task for job {}", request.getJobId());
 
         final String jarId = request.getJarId();
-        final String jarPath = ctx.jarStorage.get(jarId);
-        final String jobPath = ctx.jobStorage.get(request.getJobId());
+        final Path jarPath = ctx.jarStorage.get(jarId);
+        final Path jobPath = ctx.jobStorage.get(request.getJobId());
 
         // 1. Deserialize job configuration
         final JobConfiguration<D, V, O> jobConfig = deserializeJobConfig(jarPath, jobPath);
@@ -68,8 +69,8 @@ public class WorkerExecutor {
         LOGGER.info("Executing map task {} for job {}", request.getTaskId(), request.getJobId());
 
         final String jarId = request.getJarId();
-        final String jarPath = ctx.jarStorage.get(jarId);
-        final String jobPath = ctx.jobStorage.get(request.getJobId());
+        final Path jarPath = ctx.jarStorage.get(jarId);
+        final Path jobPath = ctx.jobStorage.get(request.getJobId());
 
         // 1. Deserialize job configuration
         final JobConfiguration<D, V, O> jobConfig = deserializeJobConfig(jarPath, jobPath);
@@ -126,7 +127,7 @@ public class WorkerExecutor {
     }
 
     private static <D extends Serializable, V extends Serializable, O extends Serializable> JobConfiguration<D, V, O> deserializeJobConfig(
-            final String jarPath, final String jobPath) throws JMRException {
+            final Path jarPath, final Path jobPath) throws JMRException {
         final JobConfiguration<D, V, O> jobConfig;
         JobClassLoader loader = new JobClassLoader(jarPath, jobPath);
         try {

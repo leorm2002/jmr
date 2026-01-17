@@ -15,8 +15,8 @@ public class WorkerContext {
     public boolean busy = false;
     public final IntermediateStorage intermediateStorage;
     public final String workerId;
-    public final ConcurrentHashMap<String, String> jarStorage;
-    public final ConcurrentHashMap<String, String> jobStorage;
+    public final ConcurrentHashMap<String, Path> jarStorage;
+    public final ConcurrentHashMap<String, Path> jobStorage;
     public final Path jarStorageDir;
     public final Path jobStorageDir;
     public final int port;

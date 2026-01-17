@@ -1,5 +1,7 @@
 package it.jmr.master.models;
 
+import java.nio.file.Path;
+
 import it.jmr.grpc.JobInfo;
 import it.jmr.grpc.JobStatus;
 
@@ -7,15 +9,15 @@ public class JobInfoInternal {
     private final String jobId;
     private final long submissionTime;
 
-    private String jobPath;
-    private String jarPath;
+    private Path jobPath;
+    private Path jarPath;
     private JobStatus status;
     private String errorMessage = "";
     private long startTime;
     private long endTime;
     private String jarId;
 
-    public String getJobPath() {
+    public Path getJobPath() {
         return jobPath;
     }
 
@@ -23,7 +25,7 @@ public class JobInfoInternal {
         return new JobInfoInternal(jobId);
     }
 
-    public void recievedJarFound(String jarPth, String jarId) {
+    public void recievedJarFound(Path jarPth, String jarId) {
         this.jarPath = jarPth;
         this.jarId = jarId;
     }
@@ -38,7 +40,7 @@ public class JobInfoInternal {
         this.status = JobStatus.FAILED;
     }
 
-    public void recievedSerializedJobFound(String jobPth) {
+    public void recievedSerializedJobFound(Path jobPth) {
         this.jobPath = jobPth;
     }
 
@@ -80,7 +82,7 @@ public class JobInfoInternal {
         return jobId;
     }
 
-    public String getJarPath() {
+    public Path getJarPath() {
         return jarPath;
     }
 

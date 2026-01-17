@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import io.grpc.ManagedChannel;
@@ -201,5 +202,18 @@ public class Worker {
             JMRLog.error(LOGGER, "Error getting status for reduce task {} of job {} from worker {}: {}", taskId, jobId, workerId, e.getMessage());
             return Pair.of(WorkerTaskStatus.FAILED, Collections.emptyList());
         }
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Worker worker = (Worker) o;
+        return Objects.equals(workerId, worker.workerId);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(workerId);
     }
 }

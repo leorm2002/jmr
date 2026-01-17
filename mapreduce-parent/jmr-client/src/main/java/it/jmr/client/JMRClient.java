@@ -1,6 +1,7 @@
 package it.jmr.client;
 
 import java.io.Serializable;
+import java.nio.file.Path;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,7 +18,7 @@ public class JMRClient implements AutoCloseable {
         this.mapReduceClient = new MapReduceClient(host, port);
     }
 
-    public <D extends Serializable, V extends Serializable, O extends Serializable> void submit(String jarPath, JobConfiguration<D, V, O> jobConfig)
+    public <D extends Serializable, V extends Serializable, O extends Serializable> void submit(Path jarPath, JobConfiguration<D, V, O> jobConfig)
             throws JMRException {
         LOGGER.info("Submitting job with jar path: {}", jarPath);
         final String jarId;

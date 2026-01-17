@@ -35,6 +35,11 @@ public class WorkerMonitor implements Runnable {
 
             ctx.workers.removeAll(deadWorkers);
 
+            // Notify listeners about dead workers
+            for (Worker deadWorker : deadWorkers) {
+                ctx.notifyWorkerFailed(deadWorker);
+            }
+
             // Sleep for a while before next check
             JmrUtils.sleep(JMRConstants.DEAD_WORKER_MONITOR_SLEEP_MS);
         }

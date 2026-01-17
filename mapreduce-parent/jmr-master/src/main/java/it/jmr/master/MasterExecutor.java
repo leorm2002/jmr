@@ -1,6 +1,7 @@
 package it.jmr.master;
 
 import java.io.Serializable;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -15,6 +16,9 @@ import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import io.grpc.StatusRuntimeException;
+import it.jmr.master.events.WorkerFailureListener;
 
 import it.jmr.common.JMRConstants;
 import it.jmr.common.WorkerTaskStatus;
@@ -76,6 +80,52 @@ public class MasterExecutor implements Runnable {
             List<it.jmr.grpc.worker.IntermediateDataLocation> intermediateDataLocations, List<Pair<String, O>> reducedData) {
     }
 
+    /**
+     * Encapsulates all the state for a job execution, allowing fault tolerance
+     * handling.
+     */
+    public static class JobExecutionContext<O extends Serializable> {
+        // MAP phase state
+        public final Queue<UnassignedMapTasks> unassignedMapQueue;
+        public final List<AssignedMapTasks> assignedMapTasks;
+        public final List<CompletedMapTasks> completedMapTasks;
+        public final List<UnassignedMapTasks> originalMapTasks;
+
+        // REDUCE phase state
+        public final Queue<UnassignedReduceTasks> unassignedReduceQueue;
+        public final List<AssignedReduceTasks> assignedReduceTasks;
+        public final List<CompletedReduceTasks<O>> completedReduceTasks;
+        public final List<UnassignedReduceTasks> originalReduceTasks;
+
+        // Phase tracking
+        public volatile boolean inReducePhase;
+
+        public JobExecutionContext() {
+            this.unassignedMapQueue = new ConcurrentLinkedQueue<>();
+            this.assignedMapTasks = new CopyOnWriteArrayList<>();
+            this.completedMapTasks = new CopyOnWriteArrayList<>();
+            this.originalMapTasks = new CopyOnWriteArrayList<>();
+
+            this.unassignedReduceQueue = new ConcurrentLinkedQueue<>();
+            this.assignedReduceTasks = new CopyOnWriteArrayList<>();
+            this.completedReduceTasks = new CopyOnWriteArrayList<>();
+            this.originalReduceTasks = new CopyOnWriteArrayList<>();
+
+            this.inReducePhase = false;
+        }
+
+        public void initMapPhase(List<UnassignedMapTasks> mapTasks) {
+            this.originalMapTasks.addAll(mapTasks);
+            this.unassignedMapQueue.addAll(mapTasks);
+        }
+
+        public void initReducePhase(List<UnassignedReduceTasks> reduceTasks) {
+            this.inReducePhase = true;
+            this.originalReduceTasks.addAll(reduceTasks);
+            this.unassignedReduceQueue.addAll(reduceTasks);
+        }
+    }
+
     private final MasterContext ctx;
 
     public MasterExecutor(MasterContext ctx) {
@@ -89,7 +139,7 @@ public class MasterExecutor implements Runnable {
 
             if (job != null) {
                 try {
-                    executeJob(job, ctx.workers);
+                    executeJob(job, ctx.workers, ctx);
                 } catch (JMRException e) {
                     JMRLog.error(LOGGER, "Error executing job {}: {}", job.getJobId(), e.getMessage());
                 } catch (Exception e) {
@@ -104,70 +154,87 @@ public class MasterExecutor implements Runnable {
     }
 
     public static <D extends Serializable, K extends Serializable, V extends Serializable, O extends Serializable> void executeJob(
-            JobInfoInternal jobInfo, List<Worker> workers) throws JMRException {
+            JobInfoInternal jobInfo, List<Worker> workers, MasterContext masterCtx) throws JMRException {
 
         LOGGER.info("\n>>> Starting job execution: {}", jobInfo.getJobId());
         jobInfo.setStatus(JobStatus.RUNNING);
 
         final String jarId = jobInfo.getJarId();
         final String jobId = jobInfo.getJobId();
-        final String jobSerializedPath = jobInfo.getJobPath();
+        final Path jobSerializedPath = jobInfo.getJobPath();
+        final Path jarPath = jobInfo.getJarPath();
 
-        // Desrialize job configuration
-        final JobConfiguration<D, V, O> jobConfig = deserializeJobConfig(jobInfo, jobInfo.getJarPath(), jobSerializedPath);
+        // Create job execution context for fault tolerance
+        final JobExecutionContext<O> jobCtx = new JobExecutionContext<>();
 
-        // Loading expected data size to proper partition
-        final long dataSize = getDataSize(jobInfo, jobConfig);
-
-        // Partition data into separate map tasks
-        final List<UnassignedMapTasks> mapTasks = chunkIntoMapTasks(workers, jarId, jobId, dataSize);
-
-        final List<AssignedMapTasks> assignedTasks = new CopyOnWriteArrayList<>();
-        final List<CompletedMapTasks> completedTasks = new CopyOnWriteArrayList<>();
-        final Queue<UnassignedMapTasks> unassignedQueue = new ConcurrentLinkedQueue<>(mapTasks);
-        final AtomicBoolean stopForError = new AtomicBoolean(false);
-
-        final Future<?> assignerFuture = ExecutorManager.getExecutor()
-                .submit(() -> submitUnassignedMapTasks(workers, assignedTasks, unassignedQueue, stopForError, jobConfig));
-
-        final Future<?> monitorFuture = ExecutorManager.getExecutor()
-                .submit(() -> monitorAssignedMapTasks(mapTasks, assignedTasks, completedTasks, unassignedQueue, stopForError));
-
-        executeMapping(jobInfo, stopForError, assignerFuture, monitorFuture);
-
-        JMRLog.debug(LOGGER, "MAP PHASE COMPLETED");
-
-        JMRLog.debug(LOGGER, "PARTITIONING AND SHUFFLING DATA");
-
-        final Map<String, List<IntermediateLocation>> partitions = completedTasks.stream().map(c -> c.intermediateDataLocations).flatMap(List::stream)
-                .collect(Collectors.groupingBy(IntermediateLocation::getPartitionId));
-
-        JMRLog.debug(LOGGER, "STARTING REDUCE PHASE");
-
-        final List<UnassignedReduceTasks> reduceTasks = createReduceTasks(jobInfo, jarId, partitions).stream().toList();
-
-        final List<AssignedReduceTasks> assignedReduceTasks = new CopyOnWriteArrayList<>();
-        final List<CompletedReduceTasks<O>> completedReduceTasks = new CopyOnWriteArrayList<>();
-        final Queue<UnassignedReduceTasks> unassignedReduceQueue = new ConcurrentLinkedQueue<>(reduceTasks);
-        stopForError.set(false); // Reset for reduce phase
-
-        final Future<?> reduceAssignerFuture = ExecutorManager.getExecutor()
-                .submit(() -> submitUnassignedReduceTasks(workers, assignedReduceTasks, unassignedReduceQueue, stopForError, jobConfig));
-
-        final Future<?> reduceMonitorFuture = ExecutorManager.getExecutor().submit(
-                () -> monitorAssignedReduceTasks(reduceTasks, assignedReduceTasks, completedReduceTasks, unassignedReduceQueue, stopForError));
-
-        reduce(jobInfo, stopForError, reduceAssignerFuture, reduceMonitorFuture);
-
-        JMRLog.debug(LOGGER, "REDUCE PHASE COMPLETED");
-
-        // Collect final results (for now, just log them)
-        for (final CompletedReduceTasks<O> task : completedReduceTasks) {
-            JMRLog.info(LOGGER, "Reduced data for partition {}: {}", task.partitionId(), task.reducedData());
+        // Register worker failure listener
+        final WorkerFailureListener failureListener = worker -> handleWorkerFailure(worker, jobCtx);
+        if (masterCtx != null) {
+            masterCtx.addWorkerFailureListener(failureListener);
         }
 
-        jobInfo.setStatus(JobStatus.COMPLETED);
-        LOGGER.info("<<< Job completed: {} (time: {}ms)\n", jobInfo.getJobId(), jobInfo.getExecutionTime());
+        try {
+            // Deserialize job configuration
+            final JobConfiguration<D, V, O> jobConfig = deserializeJobConfig(jobInfo, jarPath, jobSerializedPath);
+
+            // Loading expected data size to proper partition
+            final long dataSize = getDataSize(jobInfo, jobConfig);
+
+            // Partition data into separate map tasks
+            final List<UnassignedMapTasks> mapTasks = chunkIntoMapTasks(workers, jarId, jobId, dataSize);
+
+            // Initialize MAP phase in context
+            jobCtx.initMapPhase(mapTasks);
+
+            final AtomicBoolean stopForError = new AtomicBoolean(false);
+
+            final Future<?> assignerFuture = ExecutorManager.getExecutor()
+                    .submit(() -> submitUnassignedMapTasks(workers, jobCtx.assignedMapTasks, jobCtx.unassignedMapQueue, stopForError, jobConfig));
+
+            final Future<?> monitorFuture = ExecutorManager.getExecutor().submit(() -> monitorAssignedMapTasks(jobCtx.originalMapTasks,
+                    jobCtx.assignedMapTasks, jobCtx.completedMapTasks, jobCtx.unassignedMapQueue, stopForError));
+
+            executeMapping(jobInfo, stopForError, assignerFuture, monitorFuture);
+
+            JMRLog.debug(LOGGER, "MAP PHASE COMPLETED");
+
+            JMRLog.debug(LOGGER, "PARTITIONING AND SHUFFLING DATA");
+
+            final Map<String, List<IntermediateLocation>> partitions = jobCtx.completedMapTasks.stream().map(c -> c.intermediateDataLocations())
+                    .flatMap(List::stream).collect(Collectors.groupingBy(IntermediateLocation::getPartitionId));
+
+            JMRLog.debug(LOGGER, "STARTING REDUCE PHASE");
+
+            final List<UnassignedReduceTasks> reduceTasks = createReduceTasks(jobInfo, jarId, partitions).stream().toList();
+
+            // Initialize REDUCE phase in context
+            jobCtx.initReducePhase(reduceTasks);
+
+            stopForError.set(false); // Reset for reduce phase
+
+            final Future<?> reduceAssignerFuture = ExecutorManager.getExecutor().submit(
+                    () -> submitUnassignedReduceTasks(workers, jobCtx.assignedReduceTasks, jobCtx.unassignedReduceQueue, stopForError, jobConfig));
+
+            final Future<?> reduceMonitorFuture = ExecutorManager.getExecutor().submit(() -> monitorAssignedReduceTasks(jobCtx.originalReduceTasks,
+                    jobCtx.assignedReduceTasks, jobCtx.completedReduceTasks, jobCtx.unassignedReduceQueue, stopForError));
+
+            reduce(jobInfo, stopForError, reduceAssignerFuture, reduceMonitorFuture);
+
+            JMRLog.debug(LOGGER, "REDUCE PHASE COMPLETED");
+
+            // Collect final results (for now, just log them)
+            for (final CompletedReduceTasks<O> task : jobCtx.completedReduceTasks) {
+                JMRLog.info(LOGGER, "Reduced data for partition {}: {}", task.partitionId(), task.reducedData());
+            }
+
+            jobInfo.setStatus(JobStatus.COMPLETED);
+            LOGGER.info("<<< Job completed: {} (time: {}ms)\n", jobInfo.getJobId(), jobInfo.getExecutionTime());
+        } finally {
+            // Unregister worker failure listener
+            if (masterCtx != null) {
+                masterCtx.removeWorkerFailureListener(failureListener);
+            }
+        }
     }
 
     private static void reduce(JobInfoInternal jobInfo, final AtomicBoolean stopForError, final Future<?> reduceAssignerFuture,
@@ -261,7 +328,7 @@ public class MasterExecutor implements Runnable {
     }
 
     private static <D extends Serializable, V extends Serializable, O extends Serializable> JobConfiguration<D, V, O> deserializeJobConfig(
-            JobInfoInternal jobInfo, final String jobJarPath, final String jobSerializedPath) throws JMRException {
+            JobInfoInternal jobInfo, final Path jobJarPath, final Path jobSerializedPath) throws JMRException {
 
         final JobConfiguration<D, V, O> jobConfig;
         JobClassLoader loader = new JobClassLoader(jobJarPath, jobSerializedPath);
@@ -280,6 +347,96 @@ public class MasterExecutor implements Runnable {
             throw new JMRException("Error loading job configuration: " + e.getMessage(), e);
         }
         return jobConfig;
+    }
+
+    /**
+     * Handles worker failure by rescheduling tasks and invalidating lost
+     * intermediate data.
+     */
+    static <O extends Serializable> void handleWorkerFailure(Worker failedWorker, JobExecutionContext<O> ctx) {
+        JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Handling failure of worker {}", failedWorker.getWorkerId());
+
+        // 1. Reschedule MAP tasks that were running on the failed worker
+        final List<AssignedMapTasks> mapTasksToReschedule = ctx.assignedMapTasks.stream().filter(t -> t.worker().equals(failedWorker)).toList();
+
+        for (AssignedMapTasks task : mapTasksToReschedule) {
+            ctx.assignedMapTasks.remove(task);
+            ctx.unassignedMapQueue.offer(task.toUnassigned());
+            JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Rescheduled MAP task {} from failed worker {}", task.taskId(), failedWorker.getWorkerId());
+        }
+
+        if (!mapTasksToReschedule.isEmpty()) {
+            JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Worker {} failed, rescheduling {} MAP tasks", failedWorker.getWorkerId(),
+                    mapTasksToReschedule.size());
+        }
+
+        // 2. If in REDUCE phase, handle lost intermediate data
+        if (ctx.inReducePhase) {
+            // Reschedule REDUCE tasks running on failed worker
+            final List<AssignedReduceTasks> reduceTasksToReschedule = ctx.assignedReduceTasks.stream().filter(t -> t.worker().equals(failedWorker))
+                    .toList();
+
+            for (AssignedReduceTasks task : reduceTasksToReschedule) {
+                ctx.assignedReduceTasks.remove(task);
+                ctx.unassignedReduceQueue.offer(task.toUnassigned());
+                JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Rescheduled REDUCE task {} from failed worker {}", task.taskId(), failedWorker.getWorkerId());
+            }
+
+            // Find completed MAP tasks whose intermediate data is now lost
+            final List<CompletedMapTasks> lostDataTasks = ctx.completedMapTasks.stream().filter(t -> t.worker().equals(failedWorker)).toList();
+
+            if (!lostDataTasks.isEmpty()) {
+                JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Lost intermediate data from {} completed MAP tasks", lostDataTasks.size());
+
+                // Remove from completed and requeue for re-execution
+                for (CompletedMapTasks task : lostDataTasks) {
+                    ctx.completedMapTasks.remove(task);
+                    ctx.unassignedMapQueue.offer(new UnassignedMapTasks(task.jobId(), task.taskId(), task.chunks(), task.jarId()));
+                    JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Re-queued MAP task {} for re-execution (lost intermediate data)", task.taskId());
+                }
+
+                // Invalidate REDUCE tasks that depend on the lost data
+                // Find completed REDUCE tasks that used data from failed worker
+                final List<CompletedReduceTasks<O>> invalidReduceTasks = ctx.completedReduceTasks.stream()
+                        .filter(t -> t.intermediateDataLocations().stream().anyMatch(loc -> loc.getWorkerId().equals(failedWorker.getWorkerId())))
+                        .toList();
+
+                for (CompletedReduceTasks<O> task : invalidReduceTasks) {
+                    ctx.completedReduceTasks.remove(task);
+                    // Don't requeue yet - will be recreated when MAP tasks complete again
+                    JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Invalidated REDUCE task {} (depended on lost data)", task.taskId());
+                }
+
+                // Also invalidate assigned REDUCE tasks that depend on lost data
+                final List<AssignedReduceTasks> invalidAssignedReduceTasks = ctx.assignedReduceTasks.stream()
+                        .filter(t -> t.intermediateDataLocations().stream().anyMatch(loc -> loc.getWorkerId().equals(failedWorker.getWorkerId())))
+                        .toList();
+
+                for (AssignedReduceTasks task : invalidAssignedReduceTasks) {
+                    ctx.assignedReduceTasks.remove(task);
+                    // Don't requeue yet - will be recreated when MAP tasks complete again
+                    JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Invalidated assigned REDUCE task {} (depended on lost data)", task.taskId());
+                }
+
+                // Also invalidate unassigned REDUCE tasks that depend on lost data
+                final List<UnassignedReduceTasks> invalidUnassignedReduceTasks = new ArrayList<>();
+                for (UnassignedReduceTasks task : ctx.unassignedReduceQueue) {
+                    if (task.intermediateDataLocations().stream().anyMatch(loc -> loc.getWorkerId().equals(failedWorker.getWorkerId()))) {
+                        invalidUnassignedReduceTasks.add(task);
+                    }
+                }
+
+                for (UnassignedReduceTasks task : invalidUnassignedReduceTasks) {
+                    ctx.unassignedReduceQueue.remove(task);
+                    JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Removed unassigned REDUCE task {} (depended on lost data)", task.taskId());
+                }
+
+                int totalInvalidated = invalidReduceTasks.size() + invalidAssignedReduceTasks.size() + invalidUnassignedReduceTasks.size();
+                if (totalInvalidated > 0) {
+                    JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Invalidated {} REDUCE tasks pending MAP re-execution", totalInvalidated);
+                }
+            }
+        }
     }
 
     private static <O extends Serializable> void monitorAssignedReduceTasks(final List<UnassignedReduceTasks> reduceTasks,
@@ -303,20 +460,28 @@ public class MasterExecutor implements Runnable {
             final List<AssignedReduceTasks> toRemove = new ArrayList<>();
 
             for (final AssignedReduceTasks assigned : assignedReduceTasks) {
-                final Pair<WorkerTaskStatus, List<Pair<String, O>>> statusResponse = assigned.worker().getReduceTaskStatus(assigned.jobId(),
-                        assigned.taskId());
-                final WorkerTaskStatus status = statusResponse.getFirst();
+                try {
+                    final Pair<WorkerTaskStatus, List<Pair<String, O>>> statusResponse = assigned.worker().getReduceTaskStatus(assigned.jobId(),
+                            assigned.taskId());
+                    final WorkerTaskStatus status = statusResponse.getFirst();
 
-                if (status == WorkerTaskStatus.COMPLETED) {
-                    completedReduceTasks.add(assigned.toCompleted(statusResponse.getSecond()));
-                    toRemove.add(assigned);
-                    JMRLog.debug(LOGGER, "Reduce task {} completed", assigned.taskId());
-                } else if (status == WorkerTaskStatus.FAILED || status == WorkerTaskStatus.MISSING) {
+                    if (status == WorkerTaskStatus.COMPLETED) {
+                        completedReduceTasks.add(assigned.toCompleted(statusResponse.getSecond()));
+                        toRemove.add(assigned);
+                        JMRLog.debug(LOGGER, "Reduce task {} completed", assigned.taskId());
+                    } else if (status == WorkerTaskStatus.FAILED || status == WorkerTaskStatus.MISSING) {
+                        unassignedReduceQueue.offer(assigned.toUnassigned());
+                        toRemove.add(assigned);
+                        JMRLog.warn(LOGGER, "Reduce task {} failed or missing, re-queuing", assigned.taskId());
+                    } else {
+                        JMRLog.trace(LOGGER, "Reduce task {} still running", assigned.taskId());
+                    }
+                } catch (StatusRuntimeException e) {
+                    // gRPC error indicates worker is likely dead - reschedule immediately
+                    JMRLog.warn(LOGGER, "[FAULT-TOLERANCE] gRPC error for reduce task {} on worker {}, re-queuing: {}", assigned.taskId(),
+                            assigned.worker().getWorkerId(), e.getStatus());
                     unassignedReduceQueue.offer(assigned.toUnassigned());
                     toRemove.add(assigned);
-                    JMRLog.warn(LOGGER, "Reduce task {} failed or missing, re-queuing", assigned.taskId());
-                } else {
-                    JMRLog.trace(LOGGER, "Reduce task {} still running", assigned.taskId());
                 }
             }
 
@@ -383,20 +548,28 @@ public class MasterExecutor implements Runnable {
             final List<AssignedMapTasks> toRemove = new ArrayList<>();
 
             for (final AssignedMapTasks assigned : assignedTasks) {
-                final Pair<WorkerTaskStatus, List<IntermediateLocation>> statusResponse = assigned.worker().getMapTaskStatus(assigned.jobId(),
-                        assigned.taskId());
-                final WorkerTaskStatus status = statusResponse.getFirst();
+                try {
+                    final Pair<WorkerTaskStatus, List<IntermediateLocation>> statusResponse = assigned.worker().getMapTaskStatus(assigned.jobId(),
+                            assigned.taskId());
+                    final WorkerTaskStatus status = statusResponse.getFirst();
 
-                if (status == WorkerTaskStatus.COMPLETED) {
-                    completedTasks.add(assigned.toCompleted(statusResponse.getSecond()));
-                    toRemove.add(assigned);
-                    JMRLog.debug(LOGGER, "Task {} completed", assigned.taskId());
-                } else if (status == WorkerTaskStatus.FAILED || status == WorkerTaskStatus.MISSING) {
+                    if (status == WorkerTaskStatus.COMPLETED) {
+                        completedTasks.add(assigned.toCompleted(statusResponse.getSecond()));
+                        toRemove.add(assigned);
+                        JMRLog.debug(LOGGER, "Task {} completed", assigned.taskId());
+                    } else if (status == WorkerTaskStatus.FAILED || status == WorkerTaskStatus.MISSING) {
+                        unassignedQueue.offer(assigned.toUnassigned());
+                        toRemove.add(assigned);
+                        JMRLog.warn(LOGGER, "Task {} failed or missing, re-queuing", assigned.taskId());
+                    } else {
+                        JMRLog.trace(LOGGER, "Task {} still running", assigned.taskId());
+                    }
+                } catch (StatusRuntimeException e) {
+                    // gRPC error indicates worker is likely dead - reschedule immediately
+                    JMRLog.warn(LOGGER, "[FAULT-TOLERANCE] gRPC error for task {} on worker {}, re-queuing: {}", assigned.taskId(),
+                            assigned.worker().getWorkerId(), e.getStatus());
                     unassignedQueue.offer(assigned.toUnassigned());
                     toRemove.add(assigned);
-                    JMRLog.warn(LOGGER, "Task {} failed or missing, re-queuing", assigned.taskId());
-                } else {
-                    JMRLog.trace(LOGGER, "Task {} still running", assigned.taskId());
                 }
             }
 

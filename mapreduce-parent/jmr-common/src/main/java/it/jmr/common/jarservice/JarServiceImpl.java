@@ -21,11 +21,11 @@ public class JarServiceImpl extends JarServiceGrpc.JarServiceImplBase {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(JarServiceImpl.class);
 
-    private final ConcurrentHashMap<String, String> jarStorage;
+    private final ConcurrentHashMap<String, Path> jarStorage;
     private final Path jarStorageDir;
     private final ResourceUploadedCallback callback; // Added field
 
-    public JarServiceImpl(Path jarStorageDir, ConcurrentHashMap<String, String> jarStorage, ResourceUploadedCallback callback) {
+    public JarServiceImpl(Path jarStorageDir, ConcurrentHashMap<String, Path> jarStorage, ResourceUploadedCallback callback) {
         this.jarStorageDir = jarStorageDir;
         this.jarStorage = jarStorage;
         this.callback = callback;
@@ -36,7 +36,7 @@ public class JarServiceImpl extends JarServiceGrpc.JarServiceImplBase {
         return new StreamObserver<JarChunk>() {
             private FileOutputStream fos;
             private String jarId;
-            private String jarPath;
+            private Path jarPath;
             private long totalSize;
             private long receivedBytes = 0;
 
@@ -48,9 +48,9 @@ public class JarServiceImpl extends JarServiceGrpc.JarServiceImplBase {
                         // Use provided jar_id if present, otherwise generate a new one
                         String providedId = chunk.getJarId();
                         jarId = JmrUtils.isEmpty(providedId) ? JmrUtils.generateJarId() : providedId;
-                        jarPath = jarStorageDir.resolve(jarId + ".jar").toString();
+                        jarPath = jarStorageDir.resolve(jarId + ".jar");
                         totalSize = chunk.getTotalSize();
-                        fos = new FileOutputStream(jarPath);
+                        fos = new FileOutputStream(jarPath.toFile());
                         LOGGER.info("Receiving JAR: {} ({} bytes) with ID: {}", chunk.getJarName(), totalSize, jarId);
                     }
 
@@ -99,7 +99,7 @@ public class JarServiceImpl extends JarServiceGrpc.JarServiceImplBase {
                         fos.close();
                     }
                     if (jarPath != null) {
-                        final File file = new File(jarPath);
+                        final File file = jarPath.toFile();
                         if (file.exists()) {
                             if (file.delete()) {
                                 LOGGER.info("Cleaned up partially uploaded JAR: {}", jarPath);

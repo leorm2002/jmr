@@ -26,7 +26,7 @@ public class MyWcJob {
         }
 
         final String booksPath = args[0];
-        final String jarPath = args[1];
+        final Path jarPath = Path.of(args[1]);
         final String host = args[2];
         final int port = Integer.parseInt(args[3]);
 

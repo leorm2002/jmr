@@ -18,11 +18,11 @@ import it.jmr.grpc.UploadJobResponse;
 
 public class JobServiceImpl extends JobServiceGrpc.JobServiceImplBase {
     private static final Logger LOGGER = LoggerFactory.getLogger(JobServiceImpl.class);
-    private final ConcurrentHashMap<String, String> jobStorage;
+    private final ConcurrentHashMap<String, Path> jobStorage;
     private final Path jobStorageDir;
     private final ResourceUploadedCallback callback;
 
-    public JobServiceImpl(Path jobStorageDir, ConcurrentHashMap<String, String> jobStorage, ResourceUploadedCallback callback) {
+    public JobServiceImpl(Path jobStorageDir, ConcurrentHashMap<String, Path> jobStorage, ResourceUploadedCallback callback) {
         this.jobStorageDir = jobStorageDir;
         this.jobStorage = jobStorage;
         this.callback = callback;
@@ -61,11 +61,14 @@ public class JobServiceImpl extends JobServiceGrpc.JobServiceImplBase {
                     final String filename = JmrUtils.isEmpty(jobId) ? JmrUtils.generateJobId() : jobId;
                     final Path filepath = jobStorageDir.resolve(filename);
 
-                    jobStorage.put(filename, filepath.toString());
+                    // Track the stored job
+                    jobStorage.put(filename, filepath);
                     // Save the file to disk
                     Files.write(filepath, fileData);
                     LOGGER.info("Job file saved to {}", filepath);
-                    callback.onJobUploaded(filename, filepath.toString()); // Invoke callback
+
+                    // Notify via callback
+                    callback.onJobUploaded(filename, filepath);
 
                     // Respond to the client
                     final UploadJobResponse response = UploadJobResponse.newBuilder().setSuccess(true).setMessage("File uploaded via streaming")

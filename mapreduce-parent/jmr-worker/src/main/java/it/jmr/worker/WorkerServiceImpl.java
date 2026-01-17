@@ -16,7 +16,6 @@ import org.slf4j.LoggerFactory;
 import io.grpc.stub.StreamObserver;
 import it.jmr.common.PartitionInfo;
 import it.jmr.common.WorkerTaskStatus;
-import it.jmr.common.exceptions.JMRException;
 import it.jmr.common.utils.JMRLog;
 import it.jmr.common.utils.JmrUtils;
 import it.jmr.common.utils.Pair;

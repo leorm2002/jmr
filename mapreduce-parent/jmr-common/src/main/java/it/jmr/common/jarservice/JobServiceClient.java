@@ -7,6 +7,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -130,10 +131,10 @@ public class JobServiceClient {
      * Uploads a job from a file (raw bytes) to a worker without deserializing. This
      * is used by the master to forward job files to workers.
      */
-    public static JobUploadResult uploadJobFromFile(String jobFilePath, String jobId, JobServiceGrpc.JobServiceStub jobAsyncStub)
+    public static JobUploadResult uploadJobFromFile(Path jobFilePath, String jobId, JobServiceGrpc.JobServiceStub jobAsyncStub)
             throws JMRException, InterruptedException {
 
-        File jobFile = new File(jobFilePath);
+        File jobFile = jobFilePath.toFile();
         if (!jobFile.exists()) {
             throw new JMRException("Job file not found: " + jobFilePath);
         }

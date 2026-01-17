@@ -4,7 +4,7 @@ import java.io.*;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.nio.file.Path;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,7 +17,7 @@ import it.jmr.common.utils.JMRLog;
  */
 public class JobClassLoader extends URLClassLoader {
     private static final Logger LOGGER = LoggerFactory.getLogger(JobClassLoader.class);
-    private final String filePath;
+    private final Path filePath;
 
     /**
      * Creates a JobClassLoader with JAR and file path
@@ -26,25 +26,25 @@ public class JobClassLoader extends URLClassLoader {
      * @param filePath Path to the serialized file (can be null if not used)
      * @throws JMRException If the JAR does not exist or cannot be loaded
      */
-    public JobClassLoader(String jarPath, String filePath) throws JMRException {
+    public JobClassLoader(Path jarPath, Path filePath) throws JMRException {
         super(getJarUrl(jarPath), JobClassLoader.class.getClassLoader());
 
         this.filePath = filePath;
 
         // Verify that the JAR exists
-        if (!new File(jarPath).exists()) {
+        if (!jarPath.toFile().exists()) {
             throw new JMRException("JAR not found: " + jarPath);
         }
 
         // Verify that the file exists (if specified)
-        if (filePath != null && !new File(filePath).exists()) {
+        if (filePath != null && !filePath.toFile().exists()) {
             throw new JMRException("File not found: " + filePath);
         }
     }
 
-    private static URL[] getJarUrl(String jarPath) throws JMRException {
+    private static URL[] getJarUrl(Path jarPath) throws JMRException {
         try {
-            return new URL[] { new File(jarPath).toURI().toURL() };
+            return new URL[] { new File(jarPath.toString()).toURI().toURL() };
         } catch (java.net.MalformedURLException e) {
             throw new JMRException("Invalid JAR path", e);
         }
@@ -53,7 +53,7 @@ public class JobClassLoader extends URLClassLoader {
     /**
      * Simplified constructor - only JAR
      */
-    public JobClassLoader(String jarPath) throws JMRException {
+    public JobClassLoader(Path jarPath) throws JMRException {
         this(jarPath, null);
     }
 
@@ -75,7 +75,6 @@ public class JobClassLoader extends URLClassLoader {
      * @return The deserialized object
      * @throws JMRException If the file is not specified or deserialization fails
      */
-    @SuppressWarnings("unchecked")
     public <T> T deserializeFromFile() throws JMRException {
         if (filePath == null) {
             throw new IllegalStateException("No file specified in the constructor");
@@ -84,7 +83,7 @@ public class JobClassLoader extends URLClassLoader {
         T deserialize;
         try {
 
-            byte[] data = Files.readAllBytes(Paths.get(filePath));
+            byte[] data = Files.readAllBytes(filePath);
             deserialize = deserialize(data);
 
         } catch (InvalidObjectException e) {

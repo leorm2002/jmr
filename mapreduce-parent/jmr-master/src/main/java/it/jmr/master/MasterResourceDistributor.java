@@ -4,6 +4,9 @@ import it.jmr.common.jarservice.JarServiceClient;
 import it.jmr.common.jarservice.JobServiceClient;
 import it.jmr.common.jarservice.ResourceUploadedCallback;
 import it.jmr.master.models.Worker;
+
+import java.nio.file.Path;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,7 +20,7 @@ public class MasterResourceDistributor implements ResourceUploadedCallback {
     }
 
     @Override
-    public void onJarUploaded(String jarId, String jarPath) {
+    public void onJarUploaded(String jarId, Path jarPath) {
         LOGGER.info("Master received new JAR: {} at {}", jarId, jarPath);
         for (Worker worker : masterContext.workers) {
             LOGGER.info("Pushing JAR {} to worker {}", jarId, worker.getWorkerId());
@@ -30,7 +33,7 @@ public class MasterResourceDistributor implements ResourceUploadedCallback {
     }
 
     @Override
-    public void onJobUploaded(String jobId, String jobPath) {
+    public void onJobUploaded(String jobId, Path jobPath) {
         LOGGER.info("Master received new JOB: {} at {}", jobId, jobPath);
         for (Worker worker : masterContext.workers) {
             LOGGER.info("Pushing JOB {} to worker {}", jobId, worker.getWorkerId());

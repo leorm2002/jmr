@@ -1,5 +1,6 @@
 package it.jmr.master;
 
+import java.nio.file.Path;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -14,12 +15,12 @@ class MapReduceServiceImpl extends MapReduceServiceGrpc.MapReduceServiceImplBase
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MapReduceServiceImpl.class);
 
-    private final ConcurrentHashMap<String, String> jarsPaths;
+    private final ConcurrentHashMap<String, Path> jarsPaths;
+    private final ConcurrentHashMap<String, Path> jobsPaths;
     private final ConcurrentHashMap<String, JobInfoInternal> jobs;
     private final Queue<JobInfoInternal> jobQueue;
-    private final ConcurrentHashMap<String, String> jobsPaths;
 
-    MapReduceServiceImpl(ConcurrentHashMap<String, String> jarsPaths, ConcurrentHashMap<String, String> jobsPaths, Queue<JobInfoInternal> jobQueue) {
+    MapReduceServiceImpl(ConcurrentHashMap<String, Path> jarsPaths, ConcurrentHashMap<String, Path> jobsPaths, Queue<JobInfoInternal> jobQueue) {
         this.jobs = new ConcurrentHashMap<>();
         this.jarsPaths = jarsPaths;
         this.jobQueue = jobQueue;
@@ -35,7 +36,7 @@ class MapReduceServiceImpl extends MapReduceServiceGrpc.MapReduceServiceImplBase
         final JobInfoInternal jobInfo = JobInfoInternal.recievedJob(jobId);
         this.jobs.put(jobInfo.getJobId(), jobInfo);
 
-        final String jarPath = this.jarsPaths.get(jarId);
+        final Path jarPath = this.jarsPaths.get(jarId);
 
         if (jarPath == null) {
             jobInfo.recievedJarNotFound();
@@ -48,7 +49,7 @@ class MapReduceServiceImpl extends MapReduceServiceGrpc.MapReduceServiceImplBase
         jobInfo.recievedJarFound(jarPath, jarId);
         LOGGER.debug("JAR found for job {}: {}", jobInfo.getJobId(), jarPath);
 
-        final String jobPath = this.jobsPaths.get(jobId);
+        final Path jobPath = this.jobsPaths.get(jobId);
         if (jobPath == null) {
             jobInfo.recievedSerializedJobNotFound();
             LOGGER.error("Job file not found: {}", jobId);
