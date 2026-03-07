@@ -4,6 +4,7 @@
 \usepackage{url}
 \usepackage{natbib}
 \usepackage{graphicx}
+\usepackage{enumitem}
 \usepackage{cleveref} % this must be the last package to be loaded
 
 \newcommand{\emailaddr}[1]{\href{mailto:#1}{\texttt{#1}}}
@@ -14,16 +15,9 @@
 }
 \subtitle{Final Report for the Distributed Systems Course [Your academic year here]}
 
-% Consider watching:
-% https://www.youtube.com/watch?v=ihxSUsJB_14
-% https://www.youtube.com/watch?v=XTFWaV55uDo
 
 \author{
-    Author 1 \\ \emailaddr{author1@email.it}
-    \and
-    Author 2 \\ \emailaddr{author2@gmail.com}
-    \and
-    Author 3 \\ \emailaddr{author3@unibo.it}
+    Leonardo Naddei \\ \emailaddr{leonardo.naddei@studio.unibo.it}
 }
 
 \date{\today}
@@ -33,56 +27,14 @@
 \maketitle
 
 \begin{abstract}
-  Up to $\sim$2000 characters briefly describing the project.
+  Up to $\sim$2000 characters briefly describing the project. \cite{dean2008mapreduce}
 \end{abstract}
 
 
-\section*{Quick \LaTeX{} suggestions}
-
-If you need to cite a reference, you can use the \texttt{cite} command,
-like providing the BibTex key of some entry in the \texttt{references.bib} file,
-e.g.: \cite{adams1995hitchhiker}.
-
-You can find pre-coocked BibTex entries for most Computer Science papers on \href{https://dblp.uni-trier.de/}{DBLP}.
-
-If you need to include an image,
-let \LaTeX{} decide where to put it by using the \texttt{figure} environment,
-with a \texttt{includegraphics} command inside it.
-%
-If your need to reference a figure,
-use the \texttt{label} command to assign a label to the figure,
-and then use the \texttt{cref} command to reference it.
-%
-Put figures in the \texttt{figures} folder.
-%
-A complete example is shown in \cref{fig:universe}.
-
-\begin{figure}
-  \centering
-  \includegraphics[width=0.5\textwidth]{figures/universe.jpg}
-  \caption{This is an example image}
-  \label{fig:universe}
-\end{figure}
-
-Do \textbf{not} put any placement constraint on figures,
-such as \texttt{[h]} or \texttt{[h!]}.
-%
-Same considerations apply for other floating elements
-(e.g. tables, algorithms, listings, etc.).
-
-Do \textbf{not} use the \texttt{\textbackslash\textbackslash} or \texttt{\textbackslash newline} commands to break lines.
-
-Just leave an empty line between two paragraphs to start a new one.
-%
-The new line will be automatically indented.
-%
-This is intended: it is the \LaTeX{} way to separate capoverses.
-
-```latex
 
 \section{Concept}\label{concept}
 
-The project consists of developing a \textbf{software library} for distributed computing based on the MapReduce paradigm. The library is intended for developers who need to process large amounts of data in parallel and distributed fashion, providing a high-level abstraction that hides the complexity of distributed programming.
+The project consists of developing a software library for distributed computing based on the MapReduce paradigm. The library is intended for developers who need to process large amounts of data in parallel and distributed fashion, providing a high-level abstraction that hides the complexity of distributed programming.
 
 \subsection{Type of product}
 
@@ -99,7 +51,7 @@ The library enables large-scale data processing operations following the MapRedu
 %
 The library automatically handles data distribution across compute nodes, execution parallelization, failure management, and result aggregation.
 
-The library will be agnostic to user location, as it is distributed as a software package. The compute cluster on which jobs are executed can be on-premise (corporate datacenter) or in the cloud (AWS, Azure, GCP), depending on organizational needs.
+The library will be agnostic to user location, as it is distributed as a software package. The compute cluster on which jobs are executed can be on-premise (corporate datacenter) or in the cloud (AWS, Azure, ...), depending on organizational needs.
 
 \paragraph{Interactions with the system: when and how frequently?}
 Interaction occurs primarily at two stages:
@@ -113,7 +65,7 @@ Interaction occurs through \textbf{programmatic APIs} that developers invoke fro
 
 \paragraph{Management of data}
 The library will need to manage several types of data:
-%
+
 \begin{itemize}
   \item \textbf{Input/output data}: the library will read and write data on shared storage systems. The library will be agnostic regarding storage systems, will also come with integrated data distribution mechanisms, but will support extensions writtern by users.
   \item \textbf{Intermediate data}: during execution, partial results from the Map phase are temporarily stored in memory on worker nodes, to be subsequently processed by the Reduce phase, the transfer of this data between nodes is managed by the library
@@ -137,88 +89,707 @@ Distribution enables efficient resource sharing among multiple users and applica
 
 \section{Requirements Elicitation and Analysis}\label{requirements}
 
-\subsection{Functional requirements}
-\subsection{Non functional requirements}
-\subsection{Implementation requirements}
+This section defines the requirements for a MapReduce-style library designed to enable distributed data processing across compute clusters. The library shall provide users with abstractions for parallel computation without requiring explicit management of distribution, fault tolerance, or synchronization.
 
-\begin{itemize}
-  \item The requirements must explain \textbf{what} (not how) the software
-        being produced should do.
-        %
-        \begin{itemize}
-          \item you should not focus on the particular problems, but exclusively on
-                what you want the application to do.
-        \end{itemize}
+\section{Requirements Specification}
 
-  \item Requirements must be clearly identified, and possibly numbered
+This section defines the requirements for a MapReduce-style library designed to enable distributed data processing across compute clusters. The library executes one job at a time, is agnostic to data sources and types, provides fault tolerance for workers, and operates entirely in-memory.
 
-  \item Requirements are divided into:
-        %
-        \begin{itemize}
-          \item \textbf{Functional}: some functionality the software should provide to the user
+\subsection{Glossary}
 
-          \item \textbf{Non-functional}: requirements that do not directly concern behavioural aspects, such as consistency, availability, etc.
+\begin{description}
+    \item[MapReduce] A programming model for processing large datasets in parallel across a distributed cluster.
+    \item[Job] A complete MapReduce computation consisting of map and reduce phases applied to a dataset, configured through a builder pattern.
+    \item[Master Node] The coordinator that manages job scheduling, worker discovery, and monitors worker status. Single point of failure.
+    \item[Worker Node] A compute resource that executes map or reduce tasks. The system supports a virtually unlimited number of workers.
+    \item[Mapper] A user-defined function that processes input data items and produces intermediate key-value pairs.
+    \item[Reducer] A user-defined function that merges all intermediate values associated with the same intermediate key.
+    \item[Combiner] An optional user-defined function that performs local aggregation of mapper outputs before the shuffle phase.
+    \item[Partition] A subdivision of input data distributed across worker nodes for parallel processing.
+    \item[Shuffle Phase] The process of redistributing intermediate key-value pairs from mappers to reducers based on keys.
+    \item[DataProvider] A server-side interface that manages data locally and creates clients for remote access.
+    \item[DataProviderClient] A serializable client that accesses a DataProvider remotely, used by workers to fetch data chunks.
+    \item[Heartbeat] A periodic signal sent by worker nodes to the master to indicate they are operational.
+    \item[Task] A unit of work (either map or reduce) assigned to a worker node.
+    \item[gRPC] The Remote Procedure Call framework used for master-worker communication and data serialization.
+    \item[In-Memory Processing] All data processing occurs in RAM without disk persistence, suitable for datasets that fit entirely in memory.
+\end{description}
 
-          \item \textbf{Implementation}: constrain the entire phase of system realization,
-                for instance by requiring the use of a specific programming language and/or a specific software tool
-                %
-                \begin{itemize}
-                  \item these constraints should be adequately justified by political / economic / administrative reasons\ldots{}
-                  \item \ldots{} otherwise, implementation choices should emerge \emph{as  a consequence of} design
-                \end{itemize}
-        \end{itemize}
+\subsection{Functional Requirements}
 
-  \item If there are domain-specific terms, these should be explained in a glossary
+\subsubsection{Job Management}
 
-  \item Each requirement must have its own \textbf{acceptance criterion}
-        %
-        \begin{itemize}
-          \item these will be important for the validation phase
-        \end{itemize}
-\end{itemize}
+\begin{enumerate}[label=\textbf{FR-JM-\arabic*}]
+    \item \textbf{Job Submission via Builder Pattern}
+    \begin{itemize}
+        \item The library shall allow users to submit jobs using a fluent builder pattern that specifies: a DataProvider, a Mapper and a Reducer.
+        \item \textit{Acceptance Criterion:} A user can construct a valid Job configuration using the builder pattern with methods \texttt{readFrom()}, \texttt{map()}, and \texttt{reduce()}, and submit it successfully.
+    \end{itemize}
+    
+    \item \textbf{Sequential Job Execution}
+    \begin{itemize}
+        \item The library shall execute only one job at a time.
+        \item \textit{Acceptance Criterion:} When a job is executing, subsequent job submissions do not start execution until the current job completes.
+    \end{itemize}
+    
+    \item \textbf{Job Queue Management}
+    \begin{itemize}
+        \item The library shall maintain a FIFO queue for submitted jobs.
+        \item Jobs shall be executed in the order they were submitted, with no priority mechanism.
+        \item \textit{Acceptance Criterion:} Jobs submitted in sequence J1, J2, J3 execute in that exact order, with J2 starting only after J1 completes.
+    \end{itemize}
+    
+    \item \textbf{Job Cancellation}
+    \begin{itemize}
+        \item The library shall allow users to cancel a job currently in execution.
+        \item \textit{Acceptance Criterion:} A cancellation request terminates the running job within a reasonable time (e.g., 30 seconds), releases all allocated resources, and removes it from the queue.
+    \end{itemize}
+    
+    \item \textbf{In-Memory Result Return}
+    \begin{itemize}
+        \item The library shall return final job results in-memory to the client process that submitted the job.
+        \item \textit{Acceptance Criterion:} Upon job completion, results are accessible directly in the client process without requiring file I/O or external storage access.
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Data Provider Integration}
+
+\begin{enumerate}[label=\textbf{FR-DP-\arabic*}]
+    \item \textbf{Custom DataProvider Interface}
+    \begin{itemize}
+        \item The library shall support user-implemented DataProvider interfaces for custom data sources.
+        \item The DataProvider interface shall include methods: \texttt{init()}, \texttt{getClient()}, and \texttt{close()}.
+        \item \textit{Acceptance Criterion:} A custom DataProvider implementation can be provided to the job builder, initialized successfully, and used to access data.
+    \end{itemize}
+    
+    \item \textbf{Serializable Client Creation}
+    \begin{itemize}
+        \item The library shall create DataProviderClient instances that can be serialized and sent to remote workers.
+        \item \textit{Acceptance Criterion:} A DataProviderClient obtained via \texttt{getClient()} can be serialized, transmitted via gRPC to a worker, and used to fetch data remotely.
+    \end{itemize}
+    
+    \item \textbf{Chunked Data Fetching}
+    \begin{itemize}
+        \item The library shall support fetching data in chunks using offset and limit parameters via the \texttt{fetchChunk(offset, limit)} method.
+        \item \textit{Acceptance Criterion:} Workers can retrieve specific data ranges from the DataProvider using offset/limit, enabling parallel data access.
+    \end{itemize}
+    
+    \item \textbf{Data Source Agnosticism}
+    \begin{itemize}
+        \item The library shall be agnostic to the underlying data source (files, databases, network streams, etc.).
+        \item \textit{Acceptance Criterion:} Jobs execute successfully with DataProviders backed by different sources (e.g., file-based, database-based) without library modifications.
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Map Phase}
+
+\begin{enumerate}[label=\textbf{FR-MAP-\arabic*}]
+    \item \textbf{Custom Map Function}
+    \begin{itemize}
+        \item The library shall execute user-defined Mapper functions on input data.
+        \item The library shall be agnostic to the map function logic and data types.
+        \item \textit{Acceptance Criterion:} A Mapper implementation processes input items and produces intermediate key-value pairs according to user-defined logic.
+    \end{itemize}
+    
+    \item \textbf{Automatic Data Partitioning}
+    \begin{itemize}
+        \item The library shall automatically partition input data across available workers by default.
+        \item \textit{Acceptance Criterion:} Input data is divided into partitions equal to the number of available workers, with balanced distribution.
+    \end{itemize}
+    
+    \item \textbf{Custom Partitioning Function}
+    \begin{itemize}
+        \item The library shall allow users to provide a custom partitioning function to control how input data is divided.
+        \item \textit{Acceptance Criterion:} When a custom partitioning function is provided, data is partitioned according to the user-defined logic instead of the default strategy.
+    \end{itemize}
+    
+    \item \textbf{Parallel Map Execution}
+    \begin{itemize}
+        \item The library shall execute map tasks in parallel across worker nodes.
+        \item Each worker shall execute exactly one map task at a time.
+        \item \textit{Acceptance Criterion:} Map tasks are distributed to all available workers, with each worker processing one partition simultaneously.
+    \end{itemize}
+    
+    \item \textbf{Optional Combiner Function}
+    \begin{itemize}
+        \item The library shall support an optional user-defined combiner function for local aggregation of mapper outputs.
+        \item The combiner shall execute on worker nodes before the shuffle phase.
+        \item \textit{Acceptance Criterion:} When a combiner function is provided, it processes mapper outputs locally on each worker, reducing the volume of data transferred during shuffle.
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Reduce Phase}
+
+\begin{enumerate}[label=\textbf{FR-RED-\arabic*}]
+    \item \textbf{Custom Reduce Function}
+    \begin{itemize}
+        \item The library shall execute user-defined Reducer functions on grouped intermediate values.
+        \item The library shall be agnostic to the reduce function logic and output data types.
+        \item \textit{Acceptance Criterion:} A Reducer implementation receives all values for a key and produces final output according to user-defined logic.
+    \end{itemize}
+    
+    \item \textbf{Automatic Shuffle}
+    \begin{itemize}
+        \item The library shall automatically redistribute intermediate key-value pairs from mappers to reducers by default.
+        \item All values for a given key shall be sent to the same reducer.
+        \item \textit{Acceptance Criterion:} After the map phase, intermediate data is redistributed such that each reducer receives all values for its assigned keys.
+    \end{itemize}
+    
+    \item \textbf{Custom Shuffle/Hash Function}
+    \begin{itemize}
+        \item The library shall allow users to provide a custom hash function to control key-to-reducer assignment.
+        \item \textit{Acceptance Criterion:} When a custom hash function is provided, keys are assigned to reducers according to the user-defined hashing logic.
+    \end{itemize}
+    
+    \item \textbf{Reducer Count Based on Worker Count}
+    \begin{itemize}
+        \item The library shall set the number of reducers equal to the number of available workers.
+        \item \textit{Acceptance Criterion:} The reduce phase uses exactly as many reducers as there are workers discovered at job start.
+    \end{itemize}
+    
+    \item \textbf{Parallel Reduce Execution}
+    \begin{itemize}
+        \item The library shall execute reduce tasks in parallel across worker nodes.
+        \item Each worker shall execute exactly one reduce task at a time.
+        \item \textit{Acceptance Criterion:} Reduce tasks are distributed to all available workers, with each worker processing one key partition simultaneously.
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Fault Tolerance}
+
+\begin{enumerate}[label=\textbf{FR-FT-\arabic*}]
+    \item \textbf{Worker Heartbeat Monitoring}
+    \begin{itemize}
+        \item The library shall monitor worker nodes using periodic heartbeat signals.
+        \item \textit{Acceptance Criterion:} Workers send heartbeat messages to the master at regular intervals, and the master tracks receipt of these signals.
+    \end{itemize}
+    
+    \item \textbf{Worker Failure Detection}
+    \begin{itemize}
+        \item The library shall detect worker node failures when heartbeats are not received within a configured timeout period.
+        \item \textit{Acceptance Criterion:} When a worker fails to send a heartbeat within the timeout period, the master marks it as failed.
+    \end{itemize}
+    
+    \item \textbf{Automatic Task Reassignment}
+    \begin{itemize}
+        \item The library shall automatically reassign map and reduce tasks from failed workers to available healthy workers.
+        \item \textit{Acceptance Criterion:} When a worker fails during task execution, its tasks are reassigned to other workers and re-executed successfully.
+    \end{itemize}
+    
+    \item \textbf{Job Completion Despite Worker Failures}
+    \begin{itemize}
+        \item The library shall ensure job completion as long as at least one worker remains operational.
+        \item \textit{Acceptance Criterion:} A job completes successfully even when multiple workers fail during execution, provided at least one worker remains available.
+    \end{itemize}
+    
+    \item \textbf{No Master Failover}
+    \begin{itemize}
+        \item The library shall NOT provide automatic failover for master node failures.
+        \item Master failure results in job termination.
+        \item \textit{Acceptance Criterion:} When the master node fails, the current job terminates and cannot be recovered automatically.
+    \end{itemize}
+\end{enumerate}
+
+\subsubsection{Worker Discovery and Communication}
+
+\begin{enumerate}[label=\textbf{FR-WDC-\arabic*}]
+    \item \textbf{Automatic Worker Discovery}
+    \begin{itemize}
+        \item The library shall automatically discover available worker nodes through network scanning at master startup.
+        \item \textit{Acceptance Criterion:} At initialization, the master identifies all available workers on the network without manual configuration.
+    \end{itemize}
+    
+    % \item \textbf{Dynamic Worker Registration}
+    % \begin{itemize}
+    %     \item The library shall support workers joining the cluster dynamically.
+    %     \item \textit{Acceptance Criterion:} New workers can be added to the cluster and are discovered by the master without restart.
+    % \end{itemize}
+    
+    \item \textbf{gRPC Communication}
+    \begin{itemize}
+        \item The library shall use gRPC for all master-worker communication.
+        \item \textit{Acceptance Criterion:} All remote procedure calls between master and workers use gRPC protocol.
+    \end{itemize}
+    
+    % \item \textbf{gRPC Serialization}
+    % \begin{itemize}
+    %     \item The library shall use gRPC for serialization of data, functions, and configurations transmitted between nodes.
+    %     \item \textit{Acceptance Criterion:} All Java objects sent between master and workers are serialized/deserialized using gRPC mechanisms.
+    % \end{itemize}
+\end{enumerate}
+
+\subsubsection{Monitoring and Logging}
+
+\begin{enumerate}[label=\textbf{FR-MON-\arabic*}]
+    \item \textbf{Structured Job Status}
+    \begin{itemize}
+        \item The library shall provide structured job status information with states: WAITING, PROCESSING, DONE.
+        \item \textit{Acceptance Criterion:} Users can query job status and receive one of the defined states accurately reflecting the job's current phase.
+    \end{itemize}
+    
+    \item \textbf{Textual Logging}
+    \begin{itemize}
+        \item The library shall provide detailed textual logging for job execution, task assignment, and errors.
+        \item \textit{Acceptance Criterion:} Log messages are generated for significant events (job start, task assignment, failures, completion) and are accessible for debugging.
+    \end{itemize}
+    
+\end{enumerate}
+
+\subsection{Non-Functional Requirements}
+
+\begin{enumerate}[label=\textbf{NFR-\arabic*}]
+    \item \textbf{In-Memory Processing}
+    \begin{itemize}
+        \item The library shall perform all data processing entirely in memory without disk persistence.
+        \item The library is suitable only for datasets that fit completely in available cluster memory.
+        \item \textit{Acceptance Criterion:} No disk I/O occurs during job execution except for logging.
+    \end{itemize}
+    
+    \item \textbf{Single Task Per Worker}
+    \begin{itemize}
+        \item Each worker node shall execute at most one map or reduce task simultaneously.
+        \item \textit{Acceptance Criterion:} Monitoring shows that workers never execute more than one task concurrently.
+    \end{itemize}
+    
+    \item \textbf{Virtually Unlimited Worker Scalability}
+    \begin{itemize}
+        \item The library shall support a virtually unlimited number of worker nodes.
+        \item There shall be no hard-coded limit on worker count.
+        \item \textit{Acceptance Criterion:} The system successfully manages clusters with 10, 100, and 1000+ workers without architectural limitations.
+    \end{itemize}
+    
+    \item \textbf{Automatic Failure Recovery}
+    \begin{itemize}
+        \item The library shall automatically recover from worker failures without user intervention.
+        \item \textit{Acceptance Criterion:} Worker failures during job execution are detected and recovered automatically, with the job completing successfully.
+    \end{itemize}
+    
+    \item \textbf{Job Completion Guarantee}
+    \begin{itemize}
+        \item The library shall guarantee job completion as long as sufficient workers remain operational and memory is available.
+        \item \textit{Acceptance Criterion:} Jobs complete successfully in test scenarios with various worker failure patterns, provided at least one worker remains.
+    \end{itemize}
+    
+    \item \textbf{Data Type Agnosticism}
+    \begin{itemize}
+        \item The library shall impose no restrictions on input, intermediate, or output data types beyond serialization requirements.
+        \item \textit{Acceptance Criterion:} Jobs execute successfully with various custom data types implementing Serializable interface.
+    \end{itemize}
+    
+    \item \textbf{Function Agnosticism}
+    \begin{itemize}
+        \item The library shall impose no restrictions on the logic implemented in map, reduce, combiner, partitioning, or shuffle functions.
+        \item \textit{Acceptance Criterion:} Jobs execute successfully with diverse user-defined function implementations ranging from simple to complex algorithms.
+    \end{itemize}
+    
+    \item \textbf{Usability Through Builder Pattern}
+    \begin{itemize}
+        \item The library shall provide an intuitive fluent API through the builder pattern for job configuration.
+        \item \textit{Acceptance Criterion:} Developers can configure and submit a complete job with clear, self-documenting code using method chaining.
+    \end{itemize}
+    
+    \item \textbf{Resource Cleanup}
+    \begin{itemize}
+        \item The library shall properly release all resources (connections, memory, threads) when jobs complete or are cancelled.
+        \item \textit{Acceptance Criterion:} Memory profiling shows no resource leaks after job completion. DataProvider \texttt{close()} method is invoked properly.
+    \end{itemize}
+\end{enumerate}
+
+\subsection{Implementation Requirements}
+
+\begin{enumerate}[label=\textbf{IR-\arabic*}]
+    \item \textbf{Java Programming Language}
+    \begin{itemize}
+        \item The library shall be implemented in Java.
+        \item \textit{Acceptance Criterion:} All library components are implemented in Java and compile with a standard Java compiler (JDK 21 or higher).
+    \end{itemize}
+    
+    \item \textbf{gRPC Framework}
+    \begin{itemize}
+        \item The library shall use gRPC for inter-node communication and serialization.
+        \item \textit{Justification:} gRPC provides efficient RPC with built-in serialization, suitable for distributed systems requiring high performance.
+        \item \textit{Acceptance Criterion:} All master-worker communication uses gRPC services, and gRPC serialization is used for data transfer.
+    \end{itemize}
+    
+    \item \textbf{SLF4J Logging}
+    \begin{itemize}
+        \item The library shall use SLF4J as the logging facade.
+        \item \textit{Justification:} SLF4J provides abstraction over logging implementations, allowing users to choose their preferred backend (Logback, Log4j, etc.).
+        \item \textit{Acceptance Criterion:} All logging calls use SLF4J API, and the library functions correctly with different SLF4J-compatible backends.
+    \end{itemize}
+    
+    \item \textbf{Fat JAR Distribution}
+    \begin{itemize}
+        \item The library will require users to package their map, reduce, combiner, partitioning, and hash functions along with all dependencies into a fat JAR (uber JAR).
+        \item The fat JAR shall be distributed to all worker nodes to ensure function execution.
+        \item \textit{Justification:} User-defined functions may have custom dependencies that must be available on worker nodes. A fat JAR ensures complete dependency resolution and eliminates classpath issues in distributed environments.
+        \item \textit{Acceptance Criterion:} Workers can successfully load and execute user-defined functions from a provided fat JAR containing all necessary classes and dependencies.
+    \end{itemize}
+    
+    \item \textbf{Java Native Serialization for Job Configuration}
+    \begin{itemize}
+        \item The library shall use Java's built-in serialization mechanism for serializing JobConfiguration objects.
+        \item \textit{Justification:} Java native serialization provides a straightforward mechanism for object serialization that integrates seamlessly with the Serializable interface requirement.
+        \item \textit{Acceptance Criterion:} JobConfiguration objects are serialized and deserialized using Java's ObjectOutputStream/ObjectInputStream, maintaining object integrity across network transmission.
+    \end{itemize}
+
+    \item \textbf{Bare Metal Deployment Support}
+    \begin{itemize}
+        \item The library shall support deployment as a standard Java application on bare metal servers.
+        \item \textit{Justification:} Traditional enterprise environments may require direct deployment without containerization.
+        \item \textit{Acceptance Criterion:} The library runs successfully as a Java application on physical or virtual machines without container requirements.
+    \end{itemize}
+    
+    \item \textbf{Docker Container Support}
+    \begin{itemize}
+        \item The library shall support deployment in Docker containers.
+        \item \textit{Justification:} Containerization provides environment consistency, easy deployment, and scalability in modern cloud infrastructures.
+        \item \textit{Acceptance Criterion:} Master and worker components can be packaged as Docker images and deployed in containerized environments.
+    \end{itemize}
+    
+    \item \textbf{Serializable Interface Requirement}
+    \begin{itemize}
+        \item All user-provided data types, functions (mapper, reducer, combiner, partitioner, hash), and DataProvider implementations shall implement Java's Serializable interface.
+        \item \textit{Justification:} Serialization is required for transmitting objects across network boundaries via gRPC.
+        \item \textit{Acceptance Criterion:} The library validates that all user-provided components implement Serializable and provides clear error messages when this requirement is not met.
+    \end{itemize}
+\end{enumerate}
 
 \subsection{Relevant Distributed System Features}
 \label{ds-features}
 
-Motivate which distributed system features are relevant for your project, and which are not.
-%
+This section analyzes which distributed system features are relevant for the MapReduce library and provides justification for their importance or exclusion.
+
+\subsubsection{Transparency}
+
+\textbf{Relevance: High}
+
 \begin{itemize}
-  \item transparency
-        \begin{itemize}
-          \item does your system need to hide distribution details from users or developers?
-          \item is it important that failures, location, or replication are invisible?
-        \end{itemize}
+\item \textbf{Access Transparency}: Highly relevant. The library hides the complexity of distributed data access through the DataProvider abstraction. Users interact with a simple interface (\texttt{fetchChunk(offset, limit)}) without needing to know whether data resides locally or remotely, or how gRPC communication is implemented.
 
-  \item fault tolerance, dependability -- availability, reliability, integrity, maintainability, safety
-        \begin{itemize}
-          \item what happens if a component fails? is uninterrupted service required?
-          \item is data loss or corruption unacceptable?
-          \item how quickly must the system recover from faults?
-        \end{itemize}
+\item \textbf{Location Transparency}: Highly relevant. Users submit jobs without specifying which workers execute tasks. The master automatically discovers workers via network scan and assigns tasks transparently. Users do not need to know worker IP addresses, physical locations, or network topology.
 
-  \item performance, concurrency, computation / communication efficiency, bandwidth
-        \begin{itemize}
-          \item Are there strict requirements on response time or throughput?
-          \item Will many operations happen in parallel?
-          \item Is network usage a concern?
-        \end{itemize}
+\item \textbf{Concurrency Transparency}: Highly relevant. Multiple workers execute map and reduce tasks concurrently, but users write sequential code (single-threaded map/reduce functions). The library handles all parallelization, task distribution, synchronization, and data shuffling without requiring user intervention.
 
-  \item economy, costs
-        \begin{itemize}
-          \item Are there budget constraints for development, deployment, or operation?
-          \item Is minimizing resource usage important?
-        \end{itemize}
+\item \textbf{Failure Transparency}: Partially relevant. Worker failures are masked from users through automatic task reassignment and retry mechanisms. Jobs complete successfully despite worker crashes. However, master failures are not hidden—they result in immediate job termination, making the master's single point of failure visible to users.
+
+\item \textbf{Replication Transparency}: Not relevant. The library does not replicate data or computations for redundancy. Each partition is processed exactly once, and failed tasks are re-executed rather than replicated. There is no notion of replica consistency.
+
+\item \textbf{Migration Transparency}: Partially relevant. When a worker fails, its tasks are automatically reassigned to other workers without user intervention. However, the system does not support live migration of running tasks—tasks are restarted from the beginning on a new worker.
 \end{itemize}
 
-\section{Design}\label{design}
+\subsubsection{Fault Tolerance and Dependability}
+
+\textbf{Relevance: High (for workers), Low (for master)}
+
+\begin{itemize}
+\item \textbf{Availability}: Moderately important. The system requires at least one operational worker and a functioning master node to process jobs. Worker failures do not compromise availability as long as sufficient workers remain alive, but master failure causes complete system unavailability until manual restart.
+
+\item \textbf{Reliability}: Highly important for workers. Job completion must be guaranteed despite worker failures. The heartbeat mechanism with configurable timeout, automatic failure detection, and task reassignment ensure that jobs complete correctly even when multiple workers crash during execution. The system is reliable as long as at least one worker survives and the master remains operational.
+
+\item \textbf{Integrity}: Critical. Data integrity must be maintained throughout the entire map-shuffle-reduce pipeline. The library ensures that:
+\begin{itemize}
+    \item No data is lost during partitioning or shuffle phases
+    \item All intermediate key-value pairs reach the correct reducers
+    \item Final results are complete and accurate
+    \item Re-executed tasks produce identical results (assuming deterministic user functions)
+\end{itemize}
+The in-memory design eliminates disk corruption risks but requires careful memory management to prevent data loss due to memory exhaustion.
+
+\item \textbf{Maintainability}: Important. The system is designed for maintainability through:
+\begin{itemize}
+    \item Clear separation of concerns (DataProvider, Mapper, Reducer interfaces)
+    \item Builder pattern API for intuitive job configuration
+    \item SLF4J logging with configurable backends for debugging
+    \item Fat JAR requirement simplifies dependency management
+    \item Structured job status (WAITING/PROCESSING/DONE) aids monitoring
+\end{itemize}
+
+\item \textbf{Safety}: Highly important. The system must prevent data corruption, ensure deterministic results (given deterministic user functions), and avoid partial or inconsistent outputs. Memory exhaustion must be detected gracefully to prevent crashes or unpredictable behavior. The sequential job execution model enhances safety by eliminating job-level concurrency issues.
+\item \textbf{Recovery Time}: Moderately important. Worker failures should be detected quickly (configurable heartbeat timeout) and tasks reassigned promptly to minimize job time. Typical recovery involves:
+\begin{itemize}
+    \item Heartbeat timeout detection: seconds to minutes (configurable)
+    \item Task reassignment: immediate
+    \item Task re-execution: depends on task complexity
+\end{itemize}
+However, since jobs execute sequentially rather than in real-time, immediate recovery is less critical than in interactive systems. Master failures require manual restart with complete loss of in-progress jobs.
+\end{itemize}
+
+\subsubsection{Scalability}
+
+\textbf{Relevance: High (horizontal), Limited (vertical)}
+
+\begin{itemize}
+\item \textbf{Horizontal Scalability}: Highly relevant. The system is designed to scale out by adding more worker nodes. The architecture supports virtually unlimited workers, automatic worker discovery, and proportional performance improvement with additional nodes (assuming balanced partitioning). Users can handle increasingly large datasets by adding workers to the cluster.
+
+\item \textbf{Vertical Scalability}: Moderately relevant. The in-memory processing model benefits from increased RAM per worker, allowing processing of larger partitions. However, vertical scaling is limited by single-machine memory capacity and is less cost-effective than horizontal scaling.
+
+\item \textbf{Data Volume Growth}: Highly relevant concern. The system must handle growing datasets over time. However, the in-memory constraint means dataset size is bounded by total cluster memory. As data volumes grow, users must either:
+\begin{itemize}
+    \item Add more workers (horizontal scaling)
+    \item Increase worker memory (vertical scaling)
+    \item Partition data across multiple sequential jobs
+\end{itemize}
+
+\item \textbf{User/Request Growth}: Less relevant. The sequential job execution model (FIFO queue) means the system does not scale with concurrent users. If job submission rate increases significantly, queue length grows and latency increases. The system is optimized for throughput of individual large jobs rather than concurrent small jobs.
+
+\item \textbf{Worker Count Scalability}: Highly important. The system must efficiently manage worker discovery, heartbeat monitoring, task assignment, and data shuffling as worker count increases from tens to hundreds or thousands. The master node must scale its coordination capabilities accordingly.
+\end{itemize}
+
+\subsubsection{Security and Trust}
+
+\textbf{Relevance: Low to Moderate}
+
+\begin{itemize}
+\item \textbf{Authentication}: Not explicitly required. The library does not implement worker authentication mechanisms. In trusted network environments (private data centers, VPCs), this is acceptable. However, deployments in less trusted networks may require external authentication (VPN, firewall rules).
+
+\item \textbf{Authorization}: Not relevant. There are no multiple user roles or permission levels. All users who can submit jobs have identical capabilities. The sequential execution model and single master design eliminate multi-tenant authorization concerns.
+
+\item \textbf{Data Confidentiality}: Moderately important depending on use case. Sensitive data processed by the library is transmitted over gRPC connections. While gRPC supports TLS encryption, this is not mandated by requirements. Users processing sensitive data should configure TLS-encrypted gRPC channels externally.
+
+\item \textbf{Code Trust}: Important consideration. The fat JAR submitted by users contains arbitrary code executed on all workers. The library assumes trusted users—there is no sandboxing or code verification. Malicious or buggy user code can crash workers or consume excessive resources.
+
+\item \textbf{Network Trust}: Assumed. The automatic worker discovery via network scan assumes a trusted network where all discovered nodes are legitimate workers. There is no protection against rogue nodes joining the cluster.
+\end{itemize}
+
+\subsubsection{Resource Sharing}
+
+\textbf{Relevance: Moderate}
+
+\begin{itemize}
+\item \textbf{Worker Resource Sharing}: Highly relevant. Workers are shared resources assigned tasks by the master. Coordination is required to:
+\begin{itemize}
+    \item Prevent multiple tasks from executing simultaneously on the same worker (one task per worker constraint)
+    \item Track worker availability and current task assignments
+    \item Synchronize access to worker resources during task allocation
+\end{itemize}
+
+\item \textbf{Data Resource Sharing}: Moderately relevant. The DataProvider serves data to multiple workers concurrently during the map phase. The \texttt{fetchChunk(offset, limit)} interface supports parallel data access without explicit locking, assuming the data source can handle concurrent reads.
+
+\item \textbf{Network Bandwidth Sharing}: Important. Multiple workers simultaneously fetching data and transferring shuffle data compete for network bandwidth. The library does not implement explicit bandwidth management, assuming sufficient network capacity. The combiner function helps reduce bandwidth contention during shuffle.
+
+\item \textbf{Memory Sharing}: Not relevant at the job level. The sequential job execution model means only one job uses cluster memory at a time. Within a job, each worker processes its partition independently in its own memory space without sharing.
+
+\item \textbf{Master Resource Sharing}: Moderately relevant. The single master coordinates all workers, manages job queues, and monitors heartbeats. As worker count increases, master CPU and network I/O become shared bottleneck resources requiring efficient implementation.
+\end{itemize}
+
+\subsubsection{Openness, Interoperability, and Heterogeneity}
+
+\textbf{Relevance: Moderate to High}
+
+\begin{itemize}
+\item \textbf{Data Source Openness}: Highly relevant. The DataProvider interface enables integration with arbitrary data sources (filesystems, databases, APIs, message queues). This openness is a core design principle, allowing users to adapt the library to diverse data storage systems without modifying library code.
+
+\item \textbf{Function Openness}: Highly relevant. The library is completely agnostic to map, reduce, combiner, partitioning, and hash function implementations. Users have complete freedom to implement any computational logic, making the library applicable to diverse problem domains.
+
+\item \textbf{Data Type Heterogeneity}: Highly relevant. The library imposes no restrictions on input, intermediate, or output data types beyond the Serializable requirement. This enables processing of heterogeneous data (text, numbers, custom objects) within a single unified framework.
+
+\item \textbf{Deployment Heterogeneity}: Important. Support for both bare metal and Docker deployment accommodates heterogeneous infrastructure environments. Workers can potentially run on different operating systems (cross-platform Java) with varying hardware capabilities.
+
+\item \textbf{Technology Standardization}: Moderately important. The library uses standard technologies:
+\begin{itemize}
+    \item Java for cross-platform compatibility
+    \item gRPC for interoperable RPC communication
+    \item SLF4J for logging abstraction
+    \item Standard serialization mechanisms
+\end{itemize}
+These choices facilitate integration with existing enterprise Java ecosystems.
+
+\item \textbf{External System Integration}: Less relevant. The library is designed as a standalone batch processing system. It does not provide built-in integration with external orchestration systems, monitoring platforms, or workflow engines. Such integrations would require custom development.
+
+\item \textbf{Protocol Standardization}: Moderately relevant. gRPC provides standardized communication protocols, but the library does not expose a public API for external systems to interact with running jobs. The builder pattern API is the primary integration point.
+\end{itemize}
+
+\subsubsection{Evolvability and Maintainability}
+
+\textbf{Relevance: High}
+
+\begin{itemize}
+\item \textbf{Long-term Maintenance}: Highly important. The library is designed for long-term use with:
+\begin{itemize}
+    \item Clear interface contracts that can evolve independently
+    \item Fat JAR isolation preventing dependency conflicts
+    \item Configurable parameters allowing behavior tuning without code changes
+    \item SLF4J abstraction allowing logging backend evolution
+\end{itemize}
+
+\item \textbf{Feature Extensions}: Important. Future enhancements may include:
+\begin{itemize}
+    \item Additional fault tolerance mechanisms (master failover)
+    \item Performance optimizations (speculative execution, advanced scheduling)
+    \item Enhanced monitoring and observability
+    \item Security features (authentication, encryption)
+\end{itemize}
+The modular architecture (separate interfaces for DataProvider, Mapper, Reducer) facilitates adding features without breaking existing user code.
+
+\item \textbf{API Stability}: Highly important. User code depends on stable interfaces (SerializableMapper, SerializableReducer, DataProvider). Breaking changes force users to rewrite job implementations. The library should maintain backward compatibility or provide clear migration paths.
+
+\item \textbf{Configuration Evolution}: Important. As the system evolves, new configurable parameters may be added (e.g., advanced scheduling policies, resource limits). The configuration mechanism should support adding parameters without invalidating existing configurations.
+
+\item \textbf{Technology Updates}: Moderately important. Dependencies (gRPC, SLF4J implementations) will evolve. The library must be maintainable across Java version upgrades and dependency updates while preserving functionality.
+\end{itemize}
+
+\subsubsection{Performance, Concurrency, and Efficiency}
+
+\textbf{Relevance: Critical}
+
+\begin{itemize}
+\item \textbf{Response Time}: Moderately important. The system is designed for batch processing rather than interactive queries. Job completion time should be proportional to data size and cluster capacity. Typical acceptable ranges:
+\begin{itemize}
+    \item Job startup latency: seconds (network scan, worker discovery)
+    \item Task assignment latency: sub-second
+    \item Overall job duration: minutes to hours depending on data volume
+\end{itemize}
+Sub-second response is not required, making the system unsuitable for real-time analytics.
+
+\item \textbf{Throughput}: Highly important. The library must efficiently process large in-memory datasets by maximizing worker utilization. Key throughput considerations:
+\begin{itemize}
+    \item One task per worker ensures full CPU utilization without context switching overhead
+    \item Parallel execution of all map tasks, then all reduce tasks
+    \item Efficient shuffle minimizes idle time between phases
+    \item Sequential job execution maximizes per-job throughput but limits multi-job throughput
+\end{itemize}
+
+\item \textbf{Concurrency}: Critical. The entire system architecture relies on concurrent execution:
+\begin{itemize}
+    \item Master handles concurrent heartbeat messages from all workers
+    \item Multiple workers simultaneously execute map tasks on different partitions
+    \item Multiple workers simultaneously execute reduce tasks on different key ranges
+    \item Shuffle phase involves concurrent data transfers
+\end{itemize}
+However, sequential job-level execution simplifies concurrency control and eliminates resource contention between jobs.
+
+\item \textbf{Computation Efficiency}: Highly important. In-memory processing eliminates disk I/O overhead, providing maximum computation efficiency. Key efficiency features:
+\begin{itemize}
+    \item No serialization to disk between map and reduce phases
+    \item Optional combiner reduces redundant computation during reduce
+    \item Custom partitioning allows users to optimize load balancing
+    \item One task per worker prevents CPU oversubscription
+\end{itemize}
+
+\item \textbf{Communication Efficiency}: Highly important. Network communication can become a bottleneck:
+\begin{itemize}
+    \item \textbf{Data fetch phase}: Workers pull data chunks from DataProvider. Chunking (\texttt{fetchChunk}) allows streaming without overwhelming buffers.
+    \item \textbf{Shuffle phase}: Intermediate data is redistributed to reducers. Volume proportional to cardinality of intermediate keys and values. Combiner function critical for reducing shuffle volume.
+    \item \textbf{Heartbeat overhead}: Periodic messages consume bandwidth but are lightweight.
+    \item \textbf{gRPC efficiency}: Binary protocol reduces serialization overhead compared to text-based protocols.
+\end{itemize}
+
+\item \textbf{Bandwidth}: Important consideration. The in-memory design means all data transfers occur over the network:
+\begin{itemize}
+    \item Map phase: Input data transferred from DataProvider to workers
+    \item Shuffle phase: Intermediate data transferred between workers (potentially all-to-all communication)
+    \item Result phase: Final output transferred to master/client
+\end{itemize}
+Users must ensure network bandwidth can accommodate peak transfer rates, especially in large clusters. Gigabit Ethernet typically sufficient for moderate-scale deployments; high-speed networks (10GbE, InfiniBand) beneficial for large-scale deployments.
+
+\item \textbf{Memory Efficiency}: Critical constraint. The in-memory design requires:
+\begin{itemize}
+    \item Sufficient RAM to hold input partitions on workers during map
+    \item Sufficient RAM to hold intermediate data during shuffle
+    \item Sufficient RAM to hold reducer inputs and outputs
+    \item Memory for JVM overhead, serialization buffers, etc.
+\end{itemize}
+Memory exhaustion causes job failure. Users must carefully size cluster memory relative to dataset size.
+\end{itemize}
+
+\subsubsection{Economy and Costs}
+
+\textbf{Relevance: Important}
+
+\begin{itemize}
+\item \textbf{Development Costs}: Important consideration. The library minimizes costs through:
+\begin{itemize}
+    \item Open-source technologies (Java, gRPC, SLF4J) with no licensing fees
+    \item Clear interfaces reduce integration effort for users
+    \item Builder pattern provides intuitive API requiring minimal learning
+    \item Standard Java serialization avoids custom serialization frameworks
+\end{itemize}
+
+\item \textbf{Deployment Costs}: Moderate concern. Cost implications:
+\begin{itemize}
+    \item \textbf{Bare metal}: Requires upfront hardware investment but no cloud fees. Suitable for organizations with existing infrastructure.
+    \item \textbf{Docker/Cloud}: Lower initial costs, pay-as-you-go pricing. Auto-scaling capabilities can optimize costs for variable workloads.
+    \item \textbf{Memory costs}: In-memory design requires significant RAM, which is expensive (especially cloud RAM). Dataset size directly impacts infrastructure costs.
+\end{itemize}
+
+\item \textbf{Operational Costs}: Important. Cost considerations:
+\begin{itemize}
+    \item \textbf{Simplified operations}: Single master design reduces operational complexity compared to distributed coordination systems.
+    \item \textbf{No persistent storage}: Eliminates storage infrastructure and management costs.
+    \item \textbf{Automatic worker discovery}: Reduces manual configuration labor.
+    \item \textbf{Resource idle time}: Sequential job execution may leave cluster idle between jobs, representing wasted cost in cloud environments.
+\end{itemize}
+
+\item \textbf{Resource Utilization}: Highly important for cost efficiency:
+\begin{itemize}
+    \item \textbf{CPU utilization}: One task per worker maximizes CPU usage during job execution without oversubscription.
+    \item \textbf{Memory utilization}: In-memory design fully utilizes available RAM but requires careful capacity planning to avoid waste.
+    \item \textbf{Network utilization}: Peaks during shuffle phase; may be underutilized during map and reduce phases.
+    \item \textbf{Cluster utilization}: Sequential job execution means only one job uses the cluster at a time. Low job submission rate results in idle cluster capacity.
+\end{itemize}
+
+\item \textbf{Scalability vs. Cost Trade-off}: Important consideration. Horizontal scaling is cost-effective for computational bottlenecks but expensive for memory-bound workloads:
+\begin{itemize}
+    \item Doubling workers doubles processing capacity but also doubles memory costs
+    \item In-memory design makes cost proportional to dataset size
+    \item Users must balance job completion time requirements against infrastructure costs
+\end{itemize}
+
+\item \textbf{Total Cost of Ownership}: Important for adoption. Factors include:
+\begin{itemize}
+    \item Initial development and integration effort
+    \item Infrastructure costs (compute, memory, network)
+    \item Operational overhead (monitoring, maintenance, troubleshooting)
+    \item Cost of downtime when master fails
+    \item Opportunity cost of sequential job execution limiting throughput
+\end{itemize}
+\end{itemize}
+
+\subsubsection{Summary of Feature Relevance}
+
+\paragraph{Critical Features (Must Have)}
+\begin{itemize}
+    \item Worker fault tolerance and automatic recovery
+    \item Data integrity throughout map-shuffle-reduce pipeline
+    \item Transparency (access, location, concurrency)
+    \item Parallel execution efficiency (map and reduce phases)
+    \item Communication efficiency (shuffle optimization, combiner)
+    \item Horizontal scalability (unlimited workers)
+    \item Openness (custom data sources, functions, types)
+\end{itemize}
+
+\paragraph{Important Features (Should Have)}
+\begin{itemize}
+    \item Maintainability and evolvability
+    \item Performance optimization (throughput, resource utilization)
+    \item Cost efficiency (deployment flexibility, resource management)
+    \item Memory efficiency (in-memory constraint)
+    \item Network bandwidth management
+\end{itemize}
+
+\paragraph{Limited Relevance (Nice to Have)}
+\begin{itemize}
+    \item Security and authentication (trusted environment assumed)
+    \item Real-time response (batch processing focus)
+    \item Multi-job concurrency (sequential execution model)
+    \item External system integration (standalone design)
+\end{itemize}
+
+\paragraph{Explicitly Excluded Features}
+\begin{itemize}
+    \item Master fault tolerance (single point of failure accepted)
+    \item Data replication (re-execution instead)
+    \item Job prioritization (FIFO queue only)
+    \item Multi-tenancy and authorization (single-user model)
+    \item Task migration (restart-based recovery)
+\end{itemize}\section{Design}\label{design}
 
 This chapter explains the strategies used to meet the requirements identified in the analysis.
 %
 Ideally, the design should be the same, regardless of the technological choices made during the implementation phase.
 
-\begin{quote}
-  You can re-arrange the sections as you prefer, but all the sections must be present in the end
-\end{quote}
+
 
 \noindent
 \textbf{Important:} try to motivate your design choices in relation to the requirements and features identified
@@ -280,7 +851,6 @@ It is composed of the following main \textbf{components}:
                 \emph{etc.}
         \end{itemize}
 \end{itemize}
-
 
 \subsection{Modelling}\label{modelling}
 
