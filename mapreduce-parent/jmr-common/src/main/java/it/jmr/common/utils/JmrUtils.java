@@ -7,6 +7,8 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.nio.file.Path;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 public class JmrUtils {
     public static void sleep(int pauseTimeInMillis) {
@@ -56,6 +58,22 @@ public class JmrUtils {
             oos.writeObject(obj);
         }
         return baos.toByteArray();
+    }
+
+    public static byte[] gzip(byte[] data) throws IOException {
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream(); GZIPOutputStream gzip = new GZIPOutputStream(baos)) {
+            gzip.write(data);
+            gzip.finish();
+            return baos.toByteArray();
+        }
+    }
+
+    public static byte[] gunzip(byte[] compressedData) throws IOException {
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(compressedData); GZIPInputStream gzip = new GZIPInputStream(bais);
+                ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+            gzip.transferTo(baos);
+            return baos.toByteArray();
+        }
     }
 
 }

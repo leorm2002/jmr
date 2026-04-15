@@ -22,6 +22,8 @@ services:
       - /var/lib/jmr
     volumes:
       - worker-a-storage:/var/lib/jmr
+    ports:
+      - "51051:51051"
     restart: unless-stopped
 
   worker-b:
@@ -39,6 +41,8 @@ services:
       - /var/lib/jmr
     volumes:
       - worker-b-storage:/var/lib/jmr
+    ports:
+      - "51052:51052"
     restart: unless-stopped
 
   worker-c:
@@ -56,6 +60,8 @@ services:
       - /var/lib/jmr
     volumes:
       - worker-c-storage:/var/lib/jmr
+    ports:
+      - "51053:51053"
     restart: unless-stopped
 
   master:
@@ -81,6 +87,7 @@ services:
       - worker-c
     ports:
       - "50050:50050"
+      - "51050:51050"
     volumes:
       - master-storage:/var/lib/jmr
     restart: unless-stopped

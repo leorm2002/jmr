@@ -9,6 +9,7 @@ import java.util.Map.Entry;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import it.jmr.common.JMRConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,14 +46,13 @@ public class WorkerExecutor {
         final SerializableReducer<V, O> reducer = jobConfig.getReducer();
 
         // 2. Fetch intermediate mapped data
-        final List<Pair<String, List<V>>> mappedData = fetchIntermediateData(request, dataFetcher);
+        final List<Pair<String, V>> mappedData = fetchIntermediateData(request, dataFetcher);
 
         // 3. Execute the reduction
-        final Set<Entry<String, List<List<V>>>> partitionedData = mappedData.parallelStream()
+        final Set<Entry<String, List<V>>> partitionedData = mappedData.parallelStream()
                 .collect(Collectors.groupingByConcurrent(Pair::getFirst, Collectors.mapping(Pair::getSecond, Collectors.toList()))).entrySet();
 
-        final List<Pair<String, O>> reducedData = partitionedData.parallelStream()
-                .map(e -> reducer.apply(e.getKey(), e.getValue().stream().flatMap(List::stream).collect(Collectors.toList())))
+        final List<Pair<String, O>> reducedData = partitionedData.parallelStream().map(e -> reducer.apply(e.getKey(), e.getValue()))
                 .collect(Collectors.toList());
 
         // 4. Return reduced data
@@ -64,7 +64,7 @@ public class WorkerExecutor {
     /**
      * Executes the map task as per the request
      */
-    public static <D extends Serializable, K extends Serializable, V extends Serializable, O extends Serializable> Map<String, List<V>> executeMap(
+    public static <D extends Serializable, K extends Serializable, V extends Serializable, O extends Serializable> Map<String, List<Serializable>> executeMap(
             SubmitMapTaskRequest request, WorkerContext ctx) throws JMRException {
         LOGGER.info("Executing map task {} for job {}", request.getTaskId(), request.getJobId());
 
@@ -82,9 +82,11 @@ public class WorkerExecutor {
 
         // 3. Map data locally
         LOGGER.debug("Mapping data...");
-        final Map<String, List<V>> mappedData = data.parallelStream().map(mapper::apply).flatMap(Collection::stream)
-                // Sorting and partitioning
-                .collect(Collectors.groupingBy(Pair::getFirst, Collectors.mapping(Pair::getSecond, Collectors.toList())));
+        final int reducePartitionCount = Math.max(1, request.getReducePartitionCount() > 0 ? request.getReducePartitionCount()
+                : JMRConstants.REDUCE_BUCKETS_PER_WORKER);
+        final Map<String, List<Serializable>> mappedData = data.parallelStream().map(mapper::apply).flatMap(Collection::stream)
+                .collect(Collectors.groupingByConcurrent(pair -> computePartitionId(pair.getFirst(), reducePartitionCount),
+                        Collectors.mapping(pair -> (Serializable) Pair.of(pair.getFirst(), pair.getSecond()), Collectors.toList())));
         LOGGER.info("Map task {} for job {} completed", request.getTaskId(), request.getJobId());
 
         // 4. Return mapped data
@@ -92,17 +94,22 @@ public class WorkerExecutor {
     }
 
     // #region utils
-    private static <V extends Serializable> List<Pair<String, List<V>>> fetchIntermediateData(SubmitReduceTaskRequest request,
+    private static <V extends Serializable> List<Pair<String, V>> fetchIntermediateData(SubmitReduceTaskRequest request,
             IntermediateDataFetcher dataFetcher) throws JMRException {
 
-        final List<Pair<String, List<V>>> mappedData = new java.util.ArrayList<>();
+        final List<Pair<String, V>> mappedData = new java.util.ArrayList<>();
 
         for (final IntermediateDataLocation location : request.getLocationsList()) {
-            final List<V> fetchedData = dataFetcher.fetchIntermediateData(location.getWorkerId(), location.getHost(), location.getPort(),
+            final List<Pair<String, V>> fetchedData = dataFetcher.fetchIntermediateData(location.getWorkerId(), location.getHost(), location.getPort(),
                     location.getTaskId(), location.getPartitionId());
-            mappedData.add(Pair.of(location.getPartitionId(), fetchedData));
+            mappedData.addAll(fetchedData);
         }
         return mappedData;
+    }
+
+    static String computePartitionId(final String key, final int reducePartitionCount) {
+        final int bucketIndex = Math.floorMod(key.hashCode(), reducePartitionCount);
+        return "bucket-" + bucketIndex;
     }
 
     private static <D extends Serializable> List<D> fetchData(SubmitMapTaskRequest request, final DataProviderClient<D> provider)

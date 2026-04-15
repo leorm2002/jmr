@@ -98,13 +98,13 @@ public class Worker {
     }
 
     public <D extends Serializable, V extends Serializable, O extends Serializable> boolean submitMapTask(String jobId, String taskId, int offset,
-            int limit, String jarId, JobConfiguration<D, V, O> jobConfig) {
+            int limit, String jarId, int reducePartitionCount, JobConfiguration<D, V, O> jobConfig) {
         try {
             JMRLog.info(LOGGER, "Submitting map task {} for job {} to worker {}", taskId, jobId, workerId);
 
             // 3. send the submit
             final it.jmr.grpc.worker.SubmitMapTaskRequest request = it.jmr.grpc.worker.SubmitMapTaskRequest.newBuilder().setTaskId(taskId)
-                    .setJobId(jobId).setOffset(offset).setLimit(limit).setJarId(jarId).build();
+                    .setJobId(jobId).setOffset(offset).setLimit(limit).setJarId(jarId).setReducePartitionCount(reducePartitionCount).build();
             final SubmitMapTaskResponse response = stub.submitMapTask(request);
             if (response.getSuccess()) {
                 JMRLog.info(LOGGER, "Map task {} for job {} submitted successfully to worker {}", taskId, jobId, workerId);

@@ -61,6 +61,20 @@ function Wait-ForMaster {
     throw "Master did not become reachable on localhost:50050 within $TimeoutSeconds seconds."
 }
 
+function Open-Dashboards {
+    $urls = @(
+        "http://localhost:51050"
+    )
+
+    foreach ($url in $urls) {
+        try {
+            Start-Process $url | Out-Null
+        } catch {
+            Write-Warning "Failed to open dashboard ${url}: $($_.Exception.Message)"
+        }
+    }
+}
+
 function Assert-DockerEngineAvailable {
     cmd /c "docker info >nul 2>nul" | Out-Null
     if ($LASTEXITCODE -ne 0) {
@@ -113,6 +127,10 @@ Invoke-Step "Waiting for master port" {
     Wait-ForMaster -TimeoutSeconds 60
 }
 
+Invoke-Step "Opening dashboards" {
+    Open-Dashboards
+}
+
 $submitterExitCode = 0
 try {
     Invoke-Step "Submitting the word count job" {
@@ -142,4 +160,5 @@ Write-Host ""
 Write-Host "Word count completed successfully."
 Write-Host "Serialized result: $resultFile"
 Write-Host "Master endpoint: localhost:50050"
+Write-Host "Dashboards: http://localhost:51050 and worker tabs on :51051-:51053"
 Write-Host "Cluster still running: $([bool](-not $StopCluster))"

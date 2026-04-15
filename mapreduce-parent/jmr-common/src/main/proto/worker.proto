@@ -77,6 +77,7 @@ message SubmitMapTaskRequest {
   int64 limit = 4;                     // Numero di elementi da processare
   string jar_id = 5;                   // Jar da dove recuperare la classe
   string job_data_id = 6;               // Da dove il job serializzato
+  int32 reduce_partition_count = 7;    // Numero di bucket reduce da produrre in map
 }
 
 message SubmitMapTaskResponse {

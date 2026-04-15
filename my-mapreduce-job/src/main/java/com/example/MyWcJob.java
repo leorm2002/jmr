@@ -1,5 +1,6 @@
 package com.example;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,11 +13,12 @@ import it.jmr.common.utils.Pair;
 import it.jmr.grpcdataprovider.localgrpc.LocalGrpcDataProvider;
 
 public class MyWcJob {
+    private static final long STATUS_POLL_INTERVAL_MS = 5_000L;
 
     public static void main(String[] args) throws InterruptedException, JMRException {
 
-        if (args.length != 4) {
-            System.err.println("Usage: MyWcJob <serialized-books-data-path> <jar-path> <host> <port>");
+        if (args.length < 4 || args.length > 6) {
+            System.err.println("Usage: MyWcJob <serialized-books-data-path> <jar-path> <host> <port> [data-provider-host] [result-output-path]");
 
             System.out.println("Received parameters:");
             for (int i = 0; i < args.length; i++) {
@@ -29,6 +31,8 @@ public class MyWcJob {
         final Path jarPath = Path.of(args[1]);
         final String host = args[2];
         final int port = Integer.parseInt(args[3]);
+        final String dataProviderHost = args.length >= 5 ? args[4] : "localhost";
+        final Path resultOutputPath = args.length >= 6 ? Path.of(args[5]) : null;
 
         // Creo il mio grpc data provider server
         final List<Path> books = new ArrayList<>();
@@ -43,6 +47,7 @@ public class MyWcJob {
         }
 
         final LocalGrpcDataProvider<String> dataProviderServer = new LocalGrpcDataProvider<>(books);
+        dataProviderServer.setServerHost(dataProviderHost);
 
         // Configuro e lancio il job di MapReduce
         final JobConfiguration<String, Integer, Integer> job = Job.builder()//
@@ -68,14 +73,33 @@ public class MyWcJob {
                 // Invio il mio job al cluster
                 jmrClient.submit(jarPath, job);
 
+                String finalStatus = null;
                 while (true) {
-                    final String status = jmrClient.getJobStatus();
-                    System.out.println("Job status: " + status);
-                    Thread.sleep(10000); // Attendi 10 secondi prima di controllare di nuovo
+                    final it.jmr.client.MapReduceClient.JobProgressSnapshot progress = jmrClient.getJobProgress();
+                    final String status = progress.status();
+                    System.out.printf("Job status: %s | MAP %d%% | REDUCE %d%%%n", status, progress.mapProgress(), progress.reduceProgress());
 
                     if ("COMPLETED".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status)) {
+                        finalStatus = status;
                         break;
                     }
+
+                    Thread.sleep(STATUS_POLL_INTERVAL_MS);
+                }
+
+                if (!"COMPLETED".equals(finalStatus)) {
+                    throw new JMRException("Word count job finished with status: " + finalStatus);
+                }
+
+                if (resultOutputPath != null) {
+                    final byte[] serializedResult = jmrClient.getJobResult();
+                    try {
+                        Files.createDirectories(resultOutputPath.toAbsolutePath().getParent());
+                        Files.write(resultOutputPath, serializedResult);
+                    } catch (java.io.IOException e) {
+                        throw new JMRException("Failed to write job result to " + resultOutputPath.toAbsolutePath(), e);
+                    }
+                    System.out.println("Serialized result written to " + resultOutputPath.toAbsolutePath());
                 }
             } finally {
                 closeClient(jmrClient);

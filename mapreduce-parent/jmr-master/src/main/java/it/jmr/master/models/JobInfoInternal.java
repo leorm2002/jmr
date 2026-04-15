@@ -1,6 +1,8 @@
 package it.jmr.master.models;
 
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import it.jmr.grpc.JobInfo;
 import it.jmr.grpc.JobStatus;
@@ -8,14 +10,18 @@ import it.jmr.grpc.JobStatus;
 public class JobInfoInternal {
     private final String jobId;
     private final long submissionTime;
+    private final AtomicBoolean cancellationRequested;
 
     private Path jobPath;
     private Path jarPath;
-    private JobStatus status;
-    private String errorMessage = "";
+    private volatile JobStatus status;
+    private volatile String errorMessage = "";
     private long startTime;
     private long endTime;
     private String jarId;
+    private volatile byte[] serializedResult;
+    private volatile int mapProgress;
+    private volatile int reduceProgress;
 
     public Path getJobPath() {
         return jobPath;
@@ -48,6 +54,9 @@ public class JobInfoInternal {
         this.jobId = jobId;
         this.submissionTime = System.currentTimeMillis();
         this.status = JobStatus.PENDING;
+        this.cancellationRequested = new AtomicBoolean(false);
+        this.mapProgress = 0;
+        this.reduceProgress = 0;
     }
 
     public void setStatus(JobStatus status) {
@@ -63,9 +72,58 @@ public class JobInfoInternal {
         this.errorMessage = errorMessage;
     }
 
+    public void setMapProgress(int mapProgress) {
+        this.mapProgress = clampProgress(mapProgress);
+    }
+
+    public void setReduceProgress(int reduceProgress) {
+        this.reduceProgress = clampProgress(reduceProgress);
+    }
+
+    public int getMapProgress() {
+        return mapProgress;
+    }
+
+    public int getReduceProgress() {
+        return reduceProgress;
+    }
+
+    public boolean requestCancellation() {
+        cancellationRequested.set(true);
+        setStatus(JobStatus.CANCELLED);
+        if (errorMessage.isBlank()) {
+            errorMessage = "Job cancelled by user.";
+        }
+        return true;
+    }
+
+    public boolean isCancellationRequested() {
+        return cancellationRequested.get();
+    }
+
+    public boolean isTerminal() {
+        return status == JobStatus.COMPLETED || status == JobStatus.FAILED || status == JobStatus.CANCELLED;
+    }
+
+    public void setSerializedResult(byte[] serializedResult) {
+        this.serializedResult = serializedResult == null ? null : Arrays.copyOf(serializedResult, serializedResult.length);
+    }
+
+    public byte[] getSerializedResult() {
+        return serializedResult == null ? null : Arrays.copyOf(serializedResult, serializedResult.length);
+    }
+
+    public boolean hasSerializedResult() {
+        return serializedResult != null && serializedResult.length > 0;
+    }
+
+    public void clearSerializedResult() {
+        this.serializedResult = null;
+    }
+
     public JobInfo toProto() {
         JobInfo.Builder builder = JobInfo.newBuilder().setJobId(jobId).setStatus(status).setSubmissionTime(submissionTime).setStartTime(startTime)
-                .setEndTime(endTime).setErrorMessage(errorMessage);
+                .setEndTime(endTime).setErrorMessage(errorMessage).setMapProgress(mapProgress).setReduceProgress(reduceProgress);
 
         return builder.build();
     }
@@ -82,6 +140,10 @@ public class JobInfoInternal {
         return jobId;
     }
 
+    public long getSubmissionTime() {
+        return submissionTime;
+    }
+
     public Path getJarPath() {
         return jarPath;
     }
@@ -92,6 +154,14 @@ public class JobInfoInternal {
 
     public String getJarId() {
         return jarId;
+    }
+
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    private static int clampProgress(int progress) {
+        return Math.max(0, Math.min(100, progress));
     }
 
     @Override

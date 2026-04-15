@@ -13,6 +13,9 @@ service MapReduceService {
   
   // Ottiene lo stato di un job
   rpc GetJobStatus(GetJobStatusRequest) returns (GetJobStatusResponse);
+
+  // Recupera il risultato serializzato di un job completato
+  rpc GetJobResult(GetJobResultRequest) returns (GetJobResultResponse);
   
   // Lista tutti i job
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
@@ -46,6 +49,19 @@ message GetJobStatusResponse {
   JobInfo job_info = 2;
 }
 
+// Richiesta risultato job
+message GetJobResultRequest {
+  string job_id = 1;
+}
+
+// Risposta risultato job
+message GetJobResultResponse {
+  bool found = 1;
+  bool available = 2;
+  string message = 3;
+  bytes serialized_result = 4;
+}
+
 // Richiesta lista job
 message ListJobsRequest {
   // Vuoto per ora, potrebbe contenere filtri in futuro
@@ -77,6 +93,8 @@ message JobInfo {
   int64 start_time = 5;
   int64 end_time = 6;
   string error_message = 7;
+  int32 map_progress = 8;
+  int32 reduce_progress = 9;
 }
 
 // Stato del job

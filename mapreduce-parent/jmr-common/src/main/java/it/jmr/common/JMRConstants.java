@@ -15,4 +15,6 @@ public class JMRConstants {
     public static final int REDUCE_TASK_SCHEDULER_SLEEP_MS = 10; // 2 seconds
     public static final int DEAD_WORKER_MONITOR_SLEEP_MS = 5 * KMS; // 5 seconds
     public static final int MASTER_POLL_INTERVAL_MS = 2 * KMS; // 2 seconds
+    public static final int MAX_TASK_RETRIES = 3;
+    public static final int REDUCE_BUCKETS_PER_WORKER = 4;
 }

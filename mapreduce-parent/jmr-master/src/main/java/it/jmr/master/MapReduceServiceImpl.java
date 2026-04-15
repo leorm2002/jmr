@@ -7,6 +7,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.protobuf.ByteString;
+
 import io.grpc.stub.StreamObserver;
 import it.jmr.master.models.JobInfoInternal;
 import it.jmr.grpc.*;
@@ -20,8 +22,9 @@ class MapReduceServiceImpl extends MapReduceServiceGrpc.MapReduceServiceImplBase
     private final ConcurrentHashMap<String, JobInfoInternal> jobs;
     private final Queue<JobInfoInternal> jobQueue;
 
-    MapReduceServiceImpl(ConcurrentHashMap<String, Path> jarsPaths, ConcurrentHashMap<String, Path> jobsPaths, Queue<JobInfoInternal> jobQueue) {
-        this.jobs = new ConcurrentHashMap<>();
+    MapReduceServiceImpl(ConcurrentHashMap<String, Path> jarsPaths, ConcurrentHashMap<String, Path> jobsPaths,
+            ConcurrentHashMap<String, JobInfoInternal> jobs, Queue<JobInfoInternal> jobQueue) {
+        this.jobs = jobs;
         this.jarsPaths = jarsPaths;
         this.jobQueue = jobQueue;
         this.jobsPaths = jobsPaths;
@@ -92,6 +95,25 @@ class MapReduceServiceImpl extends MapReduceServiceGrpc.MapReduceServiceImplBase
     }
 
     @Override
+    public void getJobResult(GetJobResultRequest request, StreamObserver<GetJobResultResponse> responseObserver) {
+        LOGGER.info("Received getJobResult request for jobId: {}", request.getJobId());
+        final JobInfoInternal jobInfo = this.jobs.get(request.getJobId());
+
+        final GetJobResultResponse.Builder responseBuilder = GetJobResultResponse.newBuilder();
+        if (jobInfo == null) {
+            responseBuilder.setFound(false).setAvailable(false).setMessage("Job not found");
+        } else if (!jobInfo.hasSerializedResult()) {
+            responseBuilder.setFound(true).setAvailable(false).setMessage("Job result not available");
+        } else {
+            responseBuilder.setFound(true).setAvailable(true).setMessage("Job result available")
+                    .setSerializedResult(ByteString.copyFrom(jobInfo.getSerializedResult()));
+        }
+
+        responseObserver.onNext(responseBuilder.build());
+        responseObserver.onCompleted();
+    }
+
+    @Override
     public void listJobs(ListJobsRequest request, StreamObserver<ListJobsResponse> responseObserver) {
         LOGGER.info("Received listJobs request");
         ListJobsResponse.Builder responseBuilder = ListJobsResponse.newBuilder().setTotalCount(this.jobs.size());
@@ -112,7 +134,11 @@ class MapReduceServiceImpl extends MapReduceServiceGrpc.MapReduceServiceImplBase
         CancelJobResponse.Builder responseBuilder = CancelJobResponse.newBuilder();
 
         if (jobInfo != null && (jobInfo.getStatus() == JobStatus.RUNNING || jobInfo.getStatus() == JobStatus.PENDING)) {
-            jobInfo.setStatus(JobStatus.CANCELLED);
+            final JobStatus previousStatus = jobInfo.getStatus();
+            jobInfo.requestCancellation();
+            if (previousStatus == JobStatus.PENDING) {
+                jobQueue.remove(jobInfo);
+            }
             LOGGER.info("Job {} cancelled successfully", request.getJobId());
             responseBuilder.setSuccess(true).setMessage("Job canceled successfully");
         } else {

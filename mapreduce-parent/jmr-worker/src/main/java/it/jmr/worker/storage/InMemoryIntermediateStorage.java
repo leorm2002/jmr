@@ -16,4 +16,9 @@ public class InMemoryIntermediateStorage implements IntermediateStorage {
     public java.util.List<java.io.Serializable> getPartitionData(String taskId, String partitionId) {
         return storage.get(taskId + "_" + partitionId);
     }
+
+    @Override
+    public void clear() {
+        storage.clear();
+    }
 }

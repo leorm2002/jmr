@@ -30,6 +30,10 @@ public class LocalGrpcDataProvider<D extends Serializable> implements DataProvid
     // Can be overridden for distributed deployment
     private String serverHost = "localhost";
 
+    public void setServerHost(final String serverHost) {
+        this.serverHost = serverHost;
+    }
+
     public void blockUntilShutdown() throws InterruptedException {
         if (grpcServer != null) {
             grpcServer.awaitTermination();

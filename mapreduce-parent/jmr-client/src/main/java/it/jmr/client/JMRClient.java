@@ -48,9 +48,31 @@ public class JMRClient implements AutoCloseable {
         if (this.jobIdentifier == null) {
             throw new IllegalStateException("No job has been submitted yet.");
         }
-        LOGGER.info("Getting status for job: {}", this.jobIdentifier);
+        LOGGER.debug("Getting status for job: {}", this.jobIdentifier);
         final String status = mapReduceClient.getJobStatus(this.jobIdentifier);
         return status;
+    }
+
+    public MapReduceClient.JobProgressSnapshot getJobProgress() {
+        if (this.jobIdentifier == null) {
+            throw new IllegalStateException("No job has been submitted yet.");
+        }
+        LOGGER.debug("Getting progress for job: {}", this.jobIdentifier);
+        return mapReduceClient.getJobProgress(this.jobIdentifier);
+    }
+
+    public void cancel() throws JMRException {
+        if (this.jobIdentifier == null) {
+            throw new IllegalStateException("No job has been submitted yet.");
+        }
+        mapReduceClient.cancelJob(this.jobIdentifier);
+    }
+
+    public byte[] getJobResult() throws JMRException {
+        if (this.jobIdentifier == null) {
+            throw new IllegalStateException("No job has been submitted yet.");
+        }
+        return mapReduceClient.getJobResult(this.jobIdentifier);
     }
 
     @Override

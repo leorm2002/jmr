@@ -1,5 +1,7 @@
 package it.jmr.client;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Scanner;
 
@@ -41,11 +43,32 @@ public class InteractiveClient {
                     break;
                 }
 
-                LOGGER.info("Job {} status: {}", parts[1], client.getJobStatus(parts[1]));
+                logJobProgress(parts[1], client.getJobProgress(parts[1]));
                 break;
 
             case "list":
                 client.listJobs();
+                break;
+
+            case "cancel":
+                if (parts.length < 2) {
+                    LOGGER.error("Usage: cancel <job-id>");
+                    break;
+                }
+
+                client.cancelJob(parts[1]);
+                LOGGER.info("Cancellation requested for job {}", parts[1]);
+                break;
+
+            case "result":
+                if (parts.length < 3) {
+                    LOGGER.error("Usage: result <job-id> <output-path>");
+                    break;
+                }
+
+                final Path outputPath = Path.of(parts[2]);
+                Files.write(outputPath, client.getJobResult(parts[1]));
+                LOGGER.info("Serialized result for job {} written to {}", parts[1], outputPath.toAbsolutePath());
                 break;
 
             case "monitor":
@@ -69,6 +92,8 @@ public class InteractiveClient {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             LOGGER.error("Command interrupted", e);
+        } catch (IOException e) {
+            LOGGER.error("I/O error executing command: {}", e.getMessage(), e);
         } catch (JMRException e) {
             LOGGER.error("Error executing command: {}", e.getMessage(), e);
         }
@@ -76,10 +101,10 @@ public class InteractiveClient {
 
     private static void monitorJob(final String jobId, final MapReduceClient client) throws InterruptedException {
         while (!Thread.currentThread().isInterrupted()) {
-            final String status = client.getJobStatus(jobId);
-            LOGGER.info("Job {} status: {}", jobId, status);
+            final MapReduceClient.JobProgressSnapshot progress = client.getJobProgress(jobId);
+            logJobProgress(jobId, progress);
 
-            if (isTerminalStatus(status)) {
+            if (progress.isTerminal()) {
                 return;
             }
 
@@ -87,14 +112,21 @@ public class InteractiveClient {
         }
     }
 
-    private static boolean isTerminalStatus(final String status) {
-        return "COMPLETED".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status) || "Job not found.".equals(status);
+    private static void logJobProgress(final String jobId, final MapReduceClient.JobProgressSnapshot progress) {
+        if (!progress.found()) {
+            LOGGER.info("Job {} status: {}", jobId, progress.status());
+            return;
+        }
+
+        LOGGER.info("Job {} status: {} | MAP {}% | REDUCE {}%", jobId, progress.status(), progress.mapProgress(), progress.reduceProgress());
     }
 
     private static void printHelp() {
         LOGGER.info("\nAvailable commands:\n" + "  submit <jar-path> <serialized-job-path>       - Submits a job\n"
                 + "  status <job-id>                               - Gets the status of a job\n"
                 + "  list                                          - Lists all jobs\n"
+                + "  cancel <job-id>                               - Cancels a running or pending job\n"
+                + "  result <job-id> <output-path>                 - Downloads the serialized job result\n"
                 + "  monitor <job-id>                              - Monitors a job in real time\n"
                 + "  help                                          - Shows this help\n"
                 + "  exit | quit                                   - Exits the client\n");

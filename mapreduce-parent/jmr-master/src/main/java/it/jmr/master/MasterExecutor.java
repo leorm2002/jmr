@@ -1,25 +1,27 @@
 package it.jmr.master;
 
+import java.io.IOException;
 import java.io.Serializable;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.grpc.StatusRuntimeException;
-import it.jmr.master.events.WorkerFailureListener;
-
 import it.jmr.common.JMRConstants;
 import it.jmr.common.WorkerTaskStatus;
 import it.jmr.common.exceptions.JMRException;
@@ -32,20 +34,27 @@ import it.jmr.common.utils.JMRLog;
 import it.jmr.common.utils.JmrUtils;
 import it.jmr.common.utils.Pair;
 import it.jmr.grpc.JobStatus;
+import it.jmr.master.events.WorkerFailureListener;
 import it.jmr.master.models.JobInfoInternal;
 import it.jmr.master.models.Worker;
 
 public class MasterExecutor implements Runnable {
     private static final Logger LOGGER = LoggerFactory.getLogger(MasterExecutor.class);
 
+    private enum PhaseOutcome {
+        COMPLETED,
+        CANCELLED,
+        REPLAY_REQUIRED
+    }
+
     public record UnassignedMapTasks(String jobId, String taskId, Pair<Long, Long> chunks, String jarId) {
-        public AssignedMapTasks toAssigned(Worker worker) {
+        public AssignedMapTasks toAssigned(final Worker worker) {
             return new AssignedMapTasks(worker, jobId, taskId, chunks, jarId);
         }
     }
 
     public record AssignedMapTasks(Worker worker, String jobId, String taskId, Pair<Long, Long> chunks, String jarId) {
-        CompletedMapTasks toCompleted(List<IntermediateLocation> intermediateDataLocations) {
+        CompletedMapTasks toCompleted(final List<IntermediateLocation> intermediateDataLocations) {
             return new CompletedMapTasks(worker, jobId, taskId, chunks, jarId, intermediateDataLocations);
         }
 
@@ -60,14 +69,14 @@ public class MasterExecutor implements Runnable {
 
     public record UnassignedReduceTasks(String jobId, String taskId, String jarId, String partitionId,
             List<it.jmr.grpc.worker.IntermediateDataLocation> intermediateDataLocations) {
-        public AssignedReduceTasks toAssigned(Worker worker) {
+        public AssignedReduceTasks toAssigned(final Worker worker) {
             return new AssignedReduceTasks(worker, jobId, taskId, jarId, partitionId, intermediateDataLocations);
         }
     }
 
     public record AssignedReduceTasks(Worker worker, String jobId, String taskId, String jarId, String partitionId,
             List<it.jmr.grpc.worker.IntermediateDataLocation> intermediateDataLocations) {
-        <O extends Serializable> CompletedReduceTasks<O> toCompleted(List<Pair<String, O>> reducedData) {
+        <O extends Serializable> CompletedReduceTasks<O> toCompleted(final List<Pair<String, O>> reducedData) {
             return new CompletedReduceTasks<>(worker, jobId, taskId, jarId, partitionId, intermediateDataLocations, reducedData);
         }
 
@@ -80,63 +89,133 @@ public class MasterExecutor implements Runnable {
             List<it.jmr.grpc.worker.IntermediateDataLocation> intermediateDataLocations, List<Pair<String, O>> reducedData) {
     }
 
-    /**
-     * Encapsulates all the state for a job execution, allowing fault tolerance
-     * handling.
-     */
     public static class JobExecutionContext<O extends Serializable> {
-        // MAP phase state
         public final Queue<UnassignedMapTasks> unassignedMapQueue;
+        public final Set<String> queuedMapTaskIds;
         public final List<AssignedMapTasks> assignedMapTasks;
         public final List<CompletedMapTasks> completedMapTasks;
         public final List<UnassignedMapTasks> originalMapTasks;
+        public final Map<String, Integer> mapAttempts;
 
-        // REDUCE phase state
         public final Queue<UnassignedReduceTasks> unassignedReduceQueue;
+        public final Set<String> queuedReduceTaskIds;
         public final List<AssignedReduceTasks> assignedReduceTasks;
         public final List<CompletedReduceTasks<O>> completedReduceTasks;
         public final List<UnassignedReduceTasks> originalReduceTasks;
+        public final Map<String, Integer> reduceAttempts;
 
-        // Phase tracking
         public volatile boolean inReducePhase;
+        public final AtomicBoolean mapReplayRequested;
+        private volatile Consumer<String> eventSink;
 
         public JobExecutionContext() {
             this.unassignedMapQueue = new ConcurrentLinkedQueue<>();
+            this.queuedMapTaskIds = ConcurrentHashMap.newKeySet();
             this.assignedMapTasks = new CopyOnWriteArrayList<>();
             this.completedMapTasks = new CopyOnWriteArrayList<>();
             this.originalMapTasks = new CopyOnWriteArrayList<>();
+            this.mapAttempts = new ConcurrentHashMap<>();
 
             this.unassignedReduceQueue = new ConcurrentLinkedQueue<>();
+            this.queuedReduceTaskIds = ConcurrentHashMap.newKeySet();
             this.assignedReduceTasks = new CopyOnWriteArrayList<>();
             this.completedReduceTasks = new CopyOnWriteArrayList<>();
             this.originalReduceTasks = new CopyOnWriteArrayList<>();
+            this.reduceAttempts = new ConcurrentHashMap<>();
 
             this.inReducePhase = false;
+            this.mapReplayRequested = new AtomicBoolean(false);
+            this.eventSink = ignored -> {
+            };
         }
 
-        public void initMapPhase(List<UnassignedMapTasks> mapTasks) {
-            this.originalMapTasks.addAll(mapTasks);
-            this.unassignedMapQueue.addAll(mapTasks);
+        public void setEventSink(final Consumer<String> eventSink) {
+            this.eventSink = eventSink == null ? ignored -> {
+            } : eventSink;
         }
 
-        public void initReducePhase(List<UnassignedReduceTasks> reduceTasks) {
-            this.inReducePhase = true;
-            this.originalReduceTasks.addAll(reduceTasks);
-            this.unassignedReduceQueue.addAll(reduceTasks);
+        public void recordEvent(final String message) {
+            eventSink.accept(message);
+        }
+
+        public void initMapPhase(final List<UnassignedMapTasks> mapTasks) {
+            if (originalMapTasks.isEmpty()) {
+                originalMapTasks.addAll(mapTasks);
+            }
+            enqueueMapTasks(mapTasks);
+        }
+
+        public void initReducePhase(final List<UnassignedReduceTasks> reduceTasks) {
+            resetReducePhaseState();
+            inReducePhase = true;
+            originalReduceTasks.addAll(reduceTasks);
+            enqueueReduceTasks(reduceTasks);
+        }
+
+        public void resetReducePhaseState() {
+            inReducePhase = false;
+            mapReplayRequested.set(false);
+            unassignedReduceQueue.clear();
+            queuedReduceTaskIds.clear();
+            assignedReduceTasks.clear();
+            completedReduceTasks.clear();
+            originalReduceTasks.clear();
+            reduceAttempts.clear();
+        }
+
+        public void enqueueMapTask(final UnassignedMapTasks task) {
+            if (queuedMapTaskIds.add(task.taskId())) {
+                unassignedMapQueue.offer(task);
+            }
+        }
+
+        public void enqueueMapTasks(final List<UnassignedMapTasks> tasks) {
+            tasks.forEach(this::enqueueMapTask);
+        }
+
+        public UnassignedMapTasks pollMapTask() {
+            final UnassignedMapTasks task = unassignedMapQueue.poll();
+            if (task != null) {
+                queuedMapTaskIds.remove(task.taskId());
+            }
+            return task;
+        }
+
+        public void enqueueReduceTask(final UnassignedReduceTasks task) {
+            if (queuedReduceTaskIds.add(task.taskId())) {
+                unassignedReduceQueue.offer(task);
+            }
+        }
+
+        public void enqueueReduceTasks(final List<UnassignedReduceTasks> tasks) {
+            tasks.forEach(this::enqueueReduceTask);
+        }
+
+        public UnassignedReduceTasks pollReduceTask() {
+            final UnassignedReduceTasks task = unassignedReduceQueue.poll();
+            if (task != null) {
+                queuedReduceTaskIds.remove(task.taskId());
+            }
+            return task;
+        }
+
+        public void removeQueuedReduceTask(final UnassignedReduceTasks task) {
+            if (queuedReduceTaskIds.remove(task.taskId())) {
+                unassignedReduceQueue.remove(task);
+            }
         }
     }
 
     private final MasterContext ctx;
 
-    public MasterExecutor(MasterContext ctx) {
+    public MasterExecutor(final MasterContext ctx) {
         this.ctx = ctx;
     }
 
     @Override
     public void run() {
-        while (true) {
+        while (!Thread.currentThread().isInterrupted()) {
             final JobInfoInternal job = ctx.jobQueue.poll();
-
             if (job != null) {
                 try {
                     executeJob(job, ctx.workers, ctx);
@@ -148,387 +227,414 @@ public class MasterExecutor implements Runnable {
                     JMRLog.error(LOGGER, "Fatal error executing job {}: {} {}", job.getJobId(), t.getCause(), t.getMessage());
                 }
             }
-
             JmrUtils.sleep(JMRConstants.MASTER_POLL_INTERVAL_MS);
         }
     }
 
     public static <D extends Serializable, K extends Serializable, V extends Serializable, O extends Serializable> void executeJob(
-            JobInfoInternal jobInfo, List<Worker> workers, MasterContext masterCtx) throws JMRException {
+            final JobInfoInternal jobInfo, final List<Worker> workers, final MasterContext masterCtx) throws JMRException {
+        if (jobInfo.isCancellationRequested() || jobInfo.getStatus() == JobStatus.CANCELLED) {
+            markJobCancelled(jobInfo);
+            return;
+        }
 
         LOGGER.info("\n>>> Starting job execution: {}", jobInfo.getJobId());
+        jobInfo.clearSerializedResult();
+        jobInfo.setErrorMessage("");
+        jobInfo.setMapProgress(0);
+        jobInfo.setReduceProgress(0);
         jobInfo.setStatus(JobStatus.RUNNING);
 
         final String jarId = jobInfo.getJarId();
         final String jobId = jobInfo.getJobId();
         final Path jobSerializedPath = jobInfo.getJobPath();
         final Path jarPath = jobInfo.getJarPath();
-
-        // Create job execution context for fault tolerance
         final JobExecutionContext<O> jobCtx = new JobExecutionContext<>();
-
-        // Register worker failure listener
         final WorkerFailureListener failureListener = worker -> handleWorkerFailure(worker, jobCtx);
+
         if (masterCtx != null) {
             masterCtx.addWorkerFailureListener(failureListener);
+            masterCtx.setActiveExecution(jobInfo, jobCtx, "PREPARING");
+            masterCtx.recordEvent("Job " + jobInfo.getJobId() + " started");
+            jobCtx.setEventSink(masterCtx::recordEvent);
         }
 
         try {
-            // Deserialize job configuration
             final JobConfiguration<D, V, O> jobConfig = deserializeJobConfig(jobInfo, jarPath, jobSerializedPath);
-
-            // Loading expected data size to proper partition
-            final long dataSize = getDataSize(jobInfo, jobConfig);
-
-            // Partition data into separate map tasks
-            final List<UnassignedMapTasks> mapTasks = chunkIntoMapTasks(workers, jarId, jobId, dataSize);
-
-            // Initialize MAP phase in context
-            jobCtx.initMapPhase(mapTasks);
-
-            final AtomicBoolean stopForError = new AtomicBoolean(false);
-
-            final Future<?> assignerFuture = ExecutorManager.getExecutor()
-                    .submit(() -> submitUnassignedMapTasks(workers, jobCtx.assignedMapTasks, jobCtx.unassignedMapQueue, stopForError, jobConfig));
-
-            final Future<?> monitorFuture = ExecutorManager.getExecutor().submit(() -> monitorAssignedMapTasks(jobCtx.originalMapTasks,
-                    jobCtx.assignedMapTasks, jobCtx.completedMapTasks, jobCtx.unassignedMapQueue, stopForError));
-
-            executeMapping(jobInfo, stopForError, assignerFuture, monitorFuture);
-
-            JMRLog.debug(LOGGER, "MAP PHASE COMPLETED");
-
-            JMRLog.debug(LOGGER, "PARTITIONING AND SHUFFLING DATA");
-
-            final Map<String, List<IntermediateLocation>> partitions = jobCtx.completedMapTasks.stream().map(c -> c.intermediateDataLocations())
-                    .flatMap(List::stream).collect(Collectors.groupingBy(IntermediateLocation::getPartitionId));
-
-            JMRLog.debug(LOGGER, "STARTING REDUCE PHASE");
-
-            final List<UnassignedReduceTasks> reduceTasks = createReduceTasks(jobInfo, jarId, partitions).stream().toList();
-
-            // Initialize REDUCE phase in context
-            jobCtx.initReducePhase(reduceTasks);
-
-            stopForError.set(false); // Reset for reduce phase
-
-            final Future<?> reduceAssignerFuture = ExecutorManager.getExecutor().submit(
-                    () -> submitUnassignedReduceTasks(workers, jobCtx.assignedReduceTasks, jobCtx.unassignedReduceQueue, stopForError, jobConfig));
-
-            final Future<?> reduceMonitorFuture = ExecutorManager.getExecutor().submit(() -> monitorAssignedReduceTasks(jobCtx.originalReduceTasks,
-                    jobCtx.assignedReduceTasks, jobCtx.completedReduceTasks, jobCtx.unassignedReduceQueue, stopForError));
-
-            reduce(jobInfo, stopForError, reduceAssignerFuture, reduceMonitorFuture);
-
-            JMRLog.debug(LOGGER, "REDUCE PHASE COMPLETED");
-
-            // Collect final results (for now, just log them)
-            for (final CompletedReduceTasks<O> task : jobCtx.completedReduceTasks) {
-                JMRLog.info(LOGGER, "Reduced data for partition {}: {}", task.partitionId(), task.reducedData());
+            if (jobInfo.isCancellationRequested()) {
+                markJobCancelled(jobInfo);
+                return;
             }
 
+            final long dataSize = getDataSize(jobInfo, jobConfig);
+            ensureWorkersAvailable(jobInfo, workers);
+            final int reducePartitionCount = Math.max(1, workers.size() * JMRConstants.REDUCE_BUCKETS_PER_WORKER);
+
+            final List<UnassignedMapTasks> mapTasks = chunkIntoMapTasks(workers, jarId, jobId, dataSize);
+            jobCtx.initMapPhase(mapTasks);
+            if (masterCtx != null) {
+                masterCtx.updateActivePhase("MAP");
+            }
+
+            final AtomicBoolean stopForError = new AtomicBoolean(false);
+            final Future<?> assignerFuture = ExecutorManager.getExecutor()
+                    .submit(() -> submitUnassignedMapTasks(jobInfo, workers, jobCtx, stopForError, reducePartitionCount, jobConfig));
+            final Future<?> monitorFuture = ExecutorManager.getExecutor()
+                    .submit(() -> monitorAssignedMapTasks(jobInfo, jobCtx, stopForError));
+
+            if (executeMapping(jobInfo, stopForError, assignerFuture, monitorFuture) == PhaseOutcome.CANCELLED) {
+                return;
+            }
+
+            JMRLog.debug(LOGGER, "MAP PHASE COMPLETED");
+            jobInfo.setMapProgress(100);
+            jobInfo.setReduceProgress(0);
+
+            while (true) {
+                if (jobInfo.isCancellationRequested()) {
+                    markJobCancelled(jobInfo);
+                    return;
+                }
+
+                final Map<String, List<IntermediateLocation>> partitions = jobCtx.completedMapTasks.stream()
+                        .map(CompletedMapTasks::intermediateDataLocations).flatMap(List::stream)
+                        .collect(Collectors.groupingBy(IntermediateLocation::getPartitionId));
+
+                final List<UnassignedReduceTasks> reduceTasks = createReduceTasks(jobInfo, jarId, partitions);
+                jobCtx.initReducePhase(reduceTasks);
+                if (masterCtx != null) {
+                    masterCtx.updateActivePhase("REDUCE");
+                }
+                stopForError.set(false);
+
+                final Future<?> reduceAssignerFuture = ExecutorManager.getExecutor()
+                        .submit(() -> submitUnassignedReduceTasks(jobInfo, workers, jobCtx, stopForError, jobConfig));
+                final Future<?> reduceMonitorFuture = ExecutorManager.getExecutor()
+                        .submit(() -> monitorAssignedReduceTasks(jobInfo, jobCtx, stopForError));
+
+                final PhaseOutcome reduceOutcome = reduce(jobInfo, stopForError, jobCtx.mapReplayRequested, reduceAssignerFuture,
+                        reduceMonitorFuture);
+                if (reduceOutcome == PhaseOutcome.CANCELLED) {
+                    return;
+                }
+                if (reduceOutcome == PhaseOutcome.COMPLETED) {
+                    break;
+                }
+
+                JMRLog.warn(LOGGER,
+                        "[FAULT-TOLERANCE] Reduce phase invalidated by lost intermediate data. Re-running pending MAP tasks before retrying REDUCE.");
+                jobCtx.resetReducePhaseState();
+                jobInfo.setReduceProgress(0);
+                if (executePendingMapTasks(jobInfo, workers, jobCtx, stopForError, reducePartitionCount, jobConfig) == PhaseOutcome.CANCELLED) {
+                    return;
+                }
+            }
+
+            jobInfo.setSerializedResult(serializeJobResult(jobCtx.completedReduceTasks));
             jobInfo.setStatus(JobStatus.COMPLETED);
+            jobCtx.recordEvent("Job " + jobInfo.getJobId() + " completed");
             LOGGER.info("<<< Job completed: {} (time: {}ms)\n", jobInfo.getJobId(), jobInfo.getExecutionTime());
         } finally {
-            // Unregister worker failure listener
             if (masterCtx != null) {
                 masterCtx.removeWorkerFailureListener(failureListener);
+                masterCtx.clearActiveExecution();
             }
         }
     }
 
-    private static void reduce(JobInfoInternal jobInfo, final AtomicBoolean stopForError, final Future<?> reduceAssignerFuture,
-            final Future<?> reduceMonitorFuture) throws JMRException {
+    private static PhaseOutcome reduce(final JobInfoInternal jobInfo, final AtomicBoolean stopForError, final AtomicBoolean mapReplayRequested,
+            final Future<?> reduceAssignerFuture, final Future<?> reduceMonitorFuture) throws JMRException {
         try {
             reduceAssignerFuture.get();
             reduceMonitorFuture.get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            if (jobInfo.isCancellationRequested()) {
+                return cancelExecution(jobInfo);
+            }
             stopForError.set(true);
-            jobInfo.setStatus(JobStatus.FAILED);
-            jobInfo.setErrorMessage("Reduce phase interrupted");
+            failJob(jobInfo, "Reduce phase interrupted");
             throw new JMRException("Reduce phase interrupted", e);
         } catch (Exception e) {
+            if (jobInfo.isCancellationRequested()) {
+                return cancelExecution(jobInfo);
+            }
             stopForError.set(true);
-            jobInfo.setStatus(JobStatus.FAILED);
-            jobInfo.setErrorMessage("Error during reduce phase: " + e.getMessage());
+            failJob(jobInfo, "Error during reduce phase: " + e.getMessage());
             throw new JMRException("Error during reduce phase", e);
         }
+
+        if (jobInfo.isCancellationRequested()) {
+            return cancelExecution(jobInfo);
+        }
+        if (stopForError.get() || jobInfo.getStatus() == JobStatus.FAILED) {
+            throw new JMRException("Reduce phase failed: " + jobInfo.getErrorMessage());
+        }
+        if (mapReplayRequested.get()) {
+            return PhaseOutcome.REPLAY_REQUIRED;
+        }
+        return PhaseOutcome.COMPLETED;
     }
 
-    private static List<UnassignedReduceTasks> createReduceTasks(JobInfoInternal jobInfo, final String jarId,
+    private static List<UnassignedReduceTasks> createReduceTasks(final JobInfoInternal jobInfo, final String jarId,
             final Map<String, List<IntermediateLocation>> partitions) {
         final List<UnassignedReduceTasks> reduceTasks = new ArrayList<>();
-
         for (Map.Entry<String, List<IntermediateLocation>> partition : partitions.entrySet()) {
             final String partitionId = partition.getKey();
-            final List<IntermediateLocation> intermediateLocations = partition.getValue();
-
-            final List<it.jmr.grpc.worker.IntermediateDataLocation> locations = intermediateLocations
-                    .stream().map(loc -> it.jmr.grpc.worker.IntermediateDataLocation.newBuilder().setWorkerId(loc.getWorkerId())
-                            .setTaskId(loc.getTaskId()).setPartitionId(loc.getPartitionId()).setHost(loc.getHost()).setPort(loc.getPort()).build())
+            final List<it.jmr.grpc.worker.IntermediateDataLocation> locations = partition.getValue().stream()
+                    .map(loc -> it.jmr.grpc.worker.IntermediateDataLocation.newBuilder().setWorkerId(loc.getWorkerId()).setTaskId(loc.getTaskId())
+                            .setPartitionId(loc.getPartitionId()).setHost(loc.getHost()).setPort(loc.getPort()).build())
                     .collect(Collectors.toList());
-            final UnassignedReduceTasks task = new UnassignedReduceTasks(jobInfo.getJobId(), jobInfo.getJobId() + "-reduce-" + partitionId, jarId,
-                    partitionId, locations);
-            reduceTasks.add(task);
+            reduceTasks.add(new UnassignedReduceTasks(jobInfo.getJobId(), jobInfo.getJobId() + "-reduce-" + partitionId, jarId, partitionId,
+                    locations));
         }
         return reduceTasks;
     }
 
-    private static void executeMapping(JobInfoInternal jobInfo, final AtomicBoolean stopForError, final Future<?> assignerFuture,
+    private static PhaseOutcome executeMapping(final JobInfoInternal jobInfo, final AtomicBoolean stopForError, final Future<?> assignerFuture,
             final Future<?> monitorFuture) throws JMRException {
         try {
             assignerFuture.get();
             monitorFuture.get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            if (jobInfo.isCancellationRequested()) {
+                return cancelExecution(jobInfo);
+            }
             stopForError.set(true);
-            jobInfo.setStatus(JobStatus.FAILED);
-            jobInfo.setErrorMessage("Map phase interrupted");
+            failJob(jobInfo, "Map phase interrupted");
             throw new JMRException("Map phase interrupted", e);
         } catch (Exception e) {
+            if (jobInfo.isCancellationRequested()) {
+                return cancelExecution(jobInfo);
+            }
             stopForError.set(true);
-            jobInfo.setStatus(JobStatus.FAILED);
-            jobInfo.setErrorMessage("Error during map phase: " + e.getMessage());
+            failJob(jobInfo, "Error during map phase: " + e.getMessage());
             throw new JMRException("Error during map phase", e);
         }
+
+        if (jobInfo.isCancellationRequested()) {
+            return cancelExecution(jobInfo);
+        }
+        if (stopForError.get() || jobInfo.getStatus() == JobStatus.FAILED) {
+            throw new JMRException("Map phase failed: " + jobInfo.getErrorMessage());
+        }
+        return PhaseOutcome.COMPLETED;
     }
 
-    private static List<UnassignedMapTasks> chunkIntoMapTasks(List<Worker> workers, final String jarId, final String jobId, final long dataSize) {
-        final List<UnassignedMapTasks> mapTasks = new ArrayList<>();
+    private static <D extends Serializable, V extends Serializable, O extends Serializable> PhaseOutcome executePendingMapTasks(
+            final JobInfoInternal jobInfo, final List<Worker> workers, final JobExecutionContext<O> jobCtx, final AtomicBoolean stopForError,
+            final int reducePartitionCount, final JobConfiguration<D, V, O> jobConfig) throws JMRException {
+        jobCtx.mapReplayRequested.set(false);
+        stopForError.set(false);
 
-        final int n = workers.size() * 3;
-        final long chunkSize = dataSize / n;
+        final Future<?> replayMapAssignerFuture = ExecutorManager.getExecutor()
+                .submit(() -> submitUnassignedMapTasks(jobInfo, workers, jobCtx, stopForError, reducePartitionCount, jobConfig));
+        final Future<?> replayMapMonitorFuture = ExecutorManager.getExecutor()
+                .submit(() -> monitorAssignedMapTasks(jobInfo, jobCtx, stopForError));
+
+        return executeMapping(jobInfo, stopForError, replayMapAssignerFuture, replayMapMonitorFuture);
+    }
+
+    private static void ensureWorkersAvailable(final JobInfoInternal jobInfo, final List<Worker> workers) throws JMRException {
+        if (!workers.isEmpty()) {
+            return;
+        }
+
+        failJob(jobInfo, "No workers available to execute the job");
+        throw new JMRException("No workers available to execute the job");
+    }
+
+    private static List<UnassignedMapTasks> chunkIntoMapTasks(final List<Worker> workers, final String jarId, final String jobId,
+            final long dataSize) {
+        final List<UnassignedMapTasks> mapTasks = new ArrayList<>();
+        if (workers.isEmpty()) {
+            throw new IllegalArgumentException("At least one worker is required to create map tasks");
+        }
+        if (dataSize <= 0) {
+            return mapTasks;
+        }
+
+        final int n = Math.max(1, workers.size() * 3);
+        final long chunkSize = Math.max(1L, Math.ceilDiv(dataSize, n));
         final List<Pair<Long, Long>> chunks = buildChunks(dataSize, chunkSize);
         JMRLog.info(LOGGER, "Job {}: data size = {}, divided in {} chunks", jobId, dataSize, chunks.size());
 
         for (int i = 0; i < chunks.size(); i++) {
-            final UnassignedMapTasks task = new UnassignedMapTasks(jobId, jobId + "-map-" + i, chunks.get(i), jarId);
-            mapTasks.add(task);
+            mapTasks.add(new UnassignedMapTasks(jobId, jobId + "-map-" + i, chunks.get(i), jarId));
         }
-
         return mapTasks;
     }
 
-    private static <D extends Serializable, V extends Serializable, O extends Serializable> long getDataSize(JobInfoInternal jobInfo,
+    private static <D extends Serializable, V extends Serializable, O extends Serializable> long getDataSize(final JobInfoInternal jobInfo,
             final JobConfiguration<D, V, O> jobConfig) throws JMRException {
         final long dataSize;
-        try {
-            final DataProviderClient<D> provider = jobConfig.getDataProvider();
+        try (final DataProviderClient<D> provider = jobConfig.getDataProvider()) {
             provider.init();
             dataSize = provider.size();
         } catch (Exception e) {
-            jobInfo.setStatus(JobStatus.FAILED);
-            jobInfo.setErrorMessage(e.getMessage());
-            JMRLog.error(LOGGER, "<<< Job failed: {}", jobInfo.getJobId());
-            JMRLog.error(LOGGER, "Error loading job configuration: {}", e.getMessage());
+            failJob(jobInfo, "Error loading job configuration: " + e.getMessage());
             throw new JMRException("Error loading job configuration: " + e.getMessage(), e);
         }
         return dataSize;
     }
 
     private static <D extends Serializable, V extends Serializable, O extends Serializable> JobConfiguration<D, V, O> deserializeJobConfig(
-            JobInfoInternal jobInfo, final Path jobJarPath, final Path jobSerializedPath) throws JMRException {
-
-        final JobConfiguration<D, V, O> jobConfig;
-        JobClassLoader loader = new JobClassLoader(jobJarPath, jobSerializedPath);
+            final JobInfoInternal jobInfo, final Path jobJarPath, final Path jobSerializedPath) throws JMRException {
         try {
-            jobConfig = loader.deserializeFromFile();
+            return new JobClassLoader(jobJarPath, jobSerializedPath).deserializeFromFile();
         } catch (Exception e) {
-            jobInfo.setStatus(JobStatus.FAILED);
-            jobInfo.setErrorMessage(e.getMessage());
-            JMRLog.error(LOGGER, "<<< Job failed: {}", jobInfo.getJobId());
-            JMRLog.error(LOGGER, "Error: {}", e.getMessage());
-            JMRLog.error(LOGGER, "Error: {}", e.toString());
-            JMRLog.error(LOGGER, "StackTrace: {}", (e.getCause() != null ? e.getCause().getStackTrace() : e.getStackTrace()));
-
+            failJob(jobInfo, "Error loading job configuration: " + e.getMessage());
             JMRLog.error(LOGGER, "Full deserialization error:", e);
-
             throw new JMRException("Error loading job configuration: " + e.getMessage(), e);
         }
-        return jobConfig;
     }
 
-    /**
-     * Handles worker failure by rescheduling tasks and invalidating lost
-     * intermediate data.
-     */
-    static <O extends Serializable> void handleWorkerFailure(Worker failedWorker, JobExecutionContext<O> ctx) {
+    static <O extends Serializable> void handleWorkerFailure(final Worker failedWorker, final JobExecutionContext<O> ctx) {
         JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Handling failure of worker {}", failedWorker.getWorkerId());
 
-        // 1. Reschedule MAP tasks that were running on the failed worker
         final List<AssignedMapTasks> mapTasksToReschedule = ctx.assignedMapTasks.stream().filter(t -> t.worker().equals(failedWorker)).toList();
-
         for (AssignedMapTasks task : mapTasksToReschedule) {
             ctx.assignedMapTasks.remove(task);
-            ctx.unassignedMapQueue.offer(task.toUnassigned());
+            ctx.enqueueMapTask(task.toUnassigned());
             JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Rescheduled MAP task {} from failed worker {}", task.taskId(), failedWorker.getWorkerId());
         }
 
-        if (!mapTasksToReschedule.isEmpty()) {
-            JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Worker {} failed, rescheduling {} MAP tasks", failedWorker.getWorkerId(),
-                    mapTasksToReschedule.size());
+        if (!ctx.inReducePhase) {
+            return;
         }
 
-        // 2. If in REDUCE phase, handle lost intermediate data
-        if (ctx.inReducePhase) {
-            // Reschedule REDUCE tasks running on failed worker
-            final List<AssignedReduceTasks> reduceTasksToReschedule = ctx.assignedReduceTasks.stream().filter(t -> t.worker().equals(failedWorker))
+        final List<CompletedMapTasks> lostDataTasks = ctx.completedMapTasks.stream().filter(t -> t.worker().equals(failedWorker)).toList();
+        if (!lostDataTasks.isEmpty()) {
+            JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Lost intermediate data from {} completed MAP tasks", lostDataTasks.size());
+
+            for (CompletedMapTasks task : lostDataTasks) {
+                ctx.completedMapTasks.remove(task);
+                ctx.enqueueMapTask(new UnassignedMapTasks(task.jobId(), task.taskId(), task.chunks(), task.jarId()));
+                JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Re-queued MAP task {} for re-execution (lost intermediate data)", task.taskId());
+            }
+
+            final List<CompletedReduceTasks<O>> invalidCompletedReduceTasks = ctx.completedReduceTasks.stream()
+                    .filter(task -> dependsOnWorker(task.intermediateDataLocations(), failedWorker.getWorkerId())).toList();
+            for (CompletedReduceTasks<O> task : invalidCompletedReduceTasks) {
+                ctx.completedReduceTasks.remove(task);
+            }
+
+            final List<AssignedReduceTasks> invalidAssignedReduceTasks = ctx.assignedReduceTasks.stream()
+                    .filter(task -> task.worker().equals(failedWorker)
+                            || dependsOnWorker(task.intermediateDataLocations(), failedWorker.getWorkerId()))
                     .toList();
-
-            for (AssignedReduceTasks task : reduceTasksToReschedule) {
+            for (AssignedReduceTasks task : invalidAssignedReduceTasks) {
                 ctx.assignedReduceTasks.remove(task);
-                ctx.unassignedReduceQueue.offer(task.toUnassigned());
-                JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Rescheduled REDUCE task {} from failed worker {}", task.taskId(), failedWorker.getWorkerId());
             }
 
-            // Find completed MAP tasks whose intermediate data is now lost
-            final List<CompletedMapTasks> lostDataTasks = ctx.completedMapTasks.stream().filter(t -> t.worker().equals(failedWorker)).toList();
-
-            if (!lostDataTasks.isEmpty()) {
-                JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Lost intermediate data from {} completed MAP tasks", lostDataTasks.size());
-
-                // Remove from completed and requeue for re-execution
-                for (CompletedMapTasks task : lostDataTasks) {
-                    ctx.completedMapTasks.remove(task);
-                    ctx.unassignedMapQueue.offer(new UnassignedMapTasks(task.jobId(), task.taskId(), task.chunks(), task.jarId()));
-                    JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Re-queued MAP task {} for re-execution (lost intermediate data)", task.taskId());
-                }
-
-                // Invalidate REDUCE tasks that depend on the lost data
-                // Find completed REDUCE tasks that used data from failed worker
-                final List<CompletedReduceTasks<O>> invalidReduceTasks = ctx.completedReduceTasks.stream()
-                        .filter(t -> t.intermediateDataLocations().stream().anyMatch(loc -> loc.getWorkerId().equals(failedWorker.getWorkerId())))
-                        .toList();
-
-                for (CompletedReduceTasks<O> task : invalidReduceTasks) {
-                    ctx.completedReduceTasks.remove(task);
-                    // Don't requeue yet - will be recreated when MAP tasks complete again
-                    JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Invalidated REDUCE task {} (depended on lost data)", task.taskId());
-                }
-
-                // Also invalidate assigned REDUCE tasks that depend on lost data
-                final List<AssignedReduceTasks> invalidAssignedReduceTasks = ctx.assignedReduceTasks.stream()
-                        .filter(t -> t.intermediateDataLocations().stream().anyMatch(loc -> loc.getWorkerId().equals(failedWorker.getWorkerId())))
-                        .toList();
-
-                for (AssignedReduceTasks task : invalidAssignedReduceTasks) {
-                    ctx.assignedReduceTasks.remove(task);
-                    // Don't requeue yet - will be recreated when MAP tasks complete again
-                    JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Invalidated assigned REDUCE task {} (depended on lost data)", task.taskId());
-                }
-
-                // Also invalidate unassigned REDUCE tasks that depend on lost data
-                final List<UnassignedReduceTasks> invalidUnassignedReduceTasks = new ArrayList<>();
-                for (UnassignedReduceTasks task : ctx.unassignedReduceQueue) {
-                    if (task.intermediateDataLocations().stream().anyMatch(loc -> loc.getWorkerId().equals(failedWorker.getWorkerId()))) {
-                        invalidUnassignedReduceTasks.add(task);
-                    }
-                }
-
-                for (UnassignedReduceTasks task : invalidUnassignedReduceTasks) {
-                    ctx.unassignedReduceQueue.remove(task);
-                    JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Removed unassigned REDUCE task {} (depended on lost data)", task.taskId());
-                }
-
-                int totalInvalidated = invalidReduceTasks.size() + invalidAssignedReduceTasks.size() + invalidUnassignedReduceTasks.size();
-                if (totalInvalidated > 0) {
-                    JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Invalidated {} REDUCE tasks pending MAP re-execution", totalInvalidated);
-                }
+            final List<UnassignedReduceTasks> invalidQueuedReduceTasks = ctx.unassignedReduceQueue.stream()
+                    .filter(task -> dependsOnWorker(task.intermediateDataLocations(), failedWorker.getWorkerId())).toList();
+            for (UnassignedReduceTasks task : invalidQueuedReduceTasks) {
+                ctx.removeQueuedReduceTask(task);
             }
+
+            final int totalInvalidated = invalidCompletedReduceTasks.size() + invalidAssignedReduceTasks.size() + invalidQueuedReduceTasks.size();
+            if (totalInvalidated > 0) {
+                JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Invalidated {} REDUCE tasks pending MAP re-execution", totalInvalidated);
+            }
+            ctx.mapReplayRequested.set(true);
+            return;
+        }
+
+        final List<AssignedReduceTasks> reduceTasksToReschedule = ctx.assignedReduceTasks.stream().filter(t -> t.worker().equals(failedWorker))
+                .toList();
+        for (AssignedReduceTasks task : reduceTasksToReschedule) {
+            ctx.assignedReduceTasks.remove(task);
+            ctx.enqueueReduceTask(task.toUnassigned());
+            JMRLog.info(LOGGER, "[FAULT-TOLERANCE] Rescheduled REDUCE task {} from failed worker {}", task.taskId(), failedWorker.getWorkerId());
         }
     }
 
-    private static <O extends Serializable> void monitorAssignedReduceTasks(final List<UnassignedReduceTasks> reduceTasks,
-            final List<AssignedReduceTasks> assignedReduceTasks, final List<CompletedReduceTasks<O>> completedReduceTasks,
-            final Queue<UnassignedReduceTasks> unassignedReduceQueue, final AtomicBoolean stopForError) {
+    private static boolean dependsOnWorker(final List<it.jmr.grpc.worker.IntermediateDataLocation> intermediateDataLocations,
+            final String workerId) {
+        return intermediateDataLocations.stream().anyMatch(location -> location.getWorkerId().equals(workerId));
+    }
 
-        final int totalTasks = reduceTasks.size();
+    private static <O extends Serializable> void monitorAssignedReduceTasks(final JobInfoInternal jobInfo, final JobExecutionContext<O> jobCtx,
+            final AtomicBoolean stopForError) {
+        final int totalTasks = jobCtx.originalReduceTasks.size();
         int lastLoggedPercentage = -1;
 
-        while (!stopForError.get() && completedReduceTasks.size() < totalTasks) {
-            // Calcolo della percentuale corrente
-            int currentCompleted = completedReduceTasks.size();
-            int currentPercentage = (totalTasks > 0) ? (currentCompleted * 100 / totalTasks) : 100;
+        while (!stopForError.get() && !jobCtx.mapReplayRequested.get() && !jobInfo.isCancellationRequested()
+                && jobCtx.completedReduceTasks.size() < totalTasks) {
+            final int currentCompleted = jobCtx.completedReduceTasks.size();
+            final int currentPercentage = totalTasks > 0 ? (currentCompleted * 100 / totalTasks) : 100;
+            jobInfo.setReduceProgress(currentPercentage);
 
             if (currentPercentage >= lastLoggedPercentage + 2) {
                 JMRLog.info(LOGGER, "Reduce Progress: {}% ({} su {} task completati)", currentPercentage, currentCompleted, totalTasks);
                 lastLoggedPercentage = currentPercentage;
             }
 
-            JMRLog.debug(LOGGER, "Monitoring assigned reduce tasks: {} completed out of {}", currentCompleted, totalTasks);
             final List<AssignedReduceTasks> toRemove = new ArrayList<>();
-
-            for (final AssignedReduceTasks assigned : assignedReduceTasks) {
+            for (AssignedReduceTasks assigned : jobCtx.assignedReduceTasks) {
                 try {
                     final Pair<WorkerTaskStatus, List<Pair<String, O>>> statusResponse = assigned.worker().getReduceTaskStatus(assigned.jobId(),
                             assigned.taskId());
                     final WorkerTaskStatus status = statusResponse.getFirst();
 
                     if (status == WorkerTaskStatus.COMPLETED) {
-                        completedReduceTasks.add(assigned.toCompleted(statusResponse.getSecond()));
+                        addCompletedReduceTask(jobCtx, assigned.toCompleted(statusResponse.getSecond()));
+                        jobCtx.reduceAttempts.remove(assigned.taskId());
                         toRemove.add(assigned);
-                        JMRLog.debug(LOGGER, "Reduce task {} completed", assigned.taskId());
                     } else if (status == WorkerTaskStatus.FAILED || status == WorkerTaskStatus.MISSING) {
-                        unassignedReduceQueue.offer(assigned.toUnassigned());
                         toRemove.add(assigned);
-                        JMRLog.warn(LOGGER, "Reduce task {} failed or missing, re-queuing", assigned.taskId());
-                    } else {
-                        JMRLog.trace(LOGGER, "Reduce task {} still running", assigned.taskId());
+                        requeueReduceTask(jobInfo, jobCtx, assigned.toUnassigned(), stopForError, "state=" + status, true);
                     }
                 } catch (StatusRuntimeException e) {
-                    // gRPC error indicates worker is likely dead - reschedule immediately
-                    JMRLog.warn(LOGGER, "[FAULT-TOLERANCE] gRPC error for reduce task {} on worker {}, re-queuing: {}", assigned.taskId(),
-                            assigned.worker().getWorkerId(), e.getStatus());
-                    unassignedReduceQueue.offer(assigned.toUnassigned());
                     toRemove.add(assigned);
+                    requeueReduceTask(jobInfo, jobCtx, assigned.toUnassigned(), stopForError, "gRPC error: " + e.getStatus(), false);
                 }
             }
 
-            assignedReduceTasks.removeAll(toRemove);
+            jobCtx.assignedReduceTasks.removeAll(toRemove);
             JmrUtils.sleep(JMRConstants.REDUCE_TASK_MONITOR_SLEEP_MS);
         }
 
-        // Log finale per confermare il 100%
-        if (!stopForError.get()) {
+        if (!stopForError.get() && !jobCtx.mapReplayRequested.get() && !jobInfo.isCancellationRequested()) {
+            jobInfo.setReduceProgress(100);
             JMRLog.info(LOGGER, "Reduce Progress: 100% ({} su {} task completati)", totalTasks, totalTasks);
         }
     }
 
-    private static <D extends Serializable, V extends Serializable, O extends Serializable> void submitUnassignedReduceTasks(List<Worker> workers,
-            final List<AssignedReduceTasks> assignedReduceTasks, final Queue<UnassignedReduceTasks> unassignedReduceQueue,
-            final AtomicBoolean stopForError, JobConfiguration<D, V, O> jobConfig) {
-        while (!(unassignedReduceQueue.isEmpty() && assignedReduceTasks.isEmpty()) && !stopForError.get()) {
-            final UnassignedReduceTasks task = unassignedReduceQueue.poll();
+    private static <D extends Serializable, V extends Serializable, O extends Serializable> void submitUnassignedReduceTasks(
+            final JobInfoInternal jobInfo, final List<Worker> workers, final JobExecutionContext<O> jobCtx, final AtomicBoolean stopForError,
+            final JobConfiguration<D, V, O> jobConfig) {
+        while (!(jobCtx.unassignedReduceQueue.isEmpty() && jobCtx.assignedReduceTasks.isEmpty()) && !stopForError.get()
+                && !jobCtx.mapReplayRequested.get() && !jobInfo.isCancellationRequested()) {
+            if (workers.isEmpty()) {
+                throw new IllegalStateException("No workers available to execute reduce tasks");
+            }
+
+            final UnassignedReduceTasks task = jobCtx.pollReduceTask();
             if (task == null) {
                 JmrUtils.sleep(JMRConstants.REDUCE_TASK_SCHEDULER_SLEEP_MS);
                 continue;
             }
-            JMRLog.debug(LOGGER, "Starting reduce task assignment process for {}", task.taskId());
 
-            final Optional<AssignedReduceTasks> assigned = tryAssignReduceTask(task, workers, assignedReduceTasks, jobConfig);
-
+            final Optional<AssignedReduceTasks> assigned = tryAssignReduceTask(task, workers, jobCtx.assignedReduceTasks, jobConfig);
             if (assigned.isPresent()) {
-                JMRLog.debug(LOGGER, "Reduce task {} assigned successfully to {}", task.taskId(),
-                        assigned.get().worker().getAddress() + ":" + assigned.get().worker().getPort());
-                assignedReduceTasks.add(assigned.get());
-
+                jobCtx.assignedReduceTasks.add(assigned.get());
+                jobCtx.recordEvent("REDUCE assigned " + task.taskId() + " to " + assigned.get().worker().getWorkerId());
             } else {
-                JMRLog.debug(LOGGER, "No worker available for reduce task {}", task.taskId());
-                unassignedReduceQueue.offer(task);
-                // JmrUtils.sleep(JMRConstants.REDUCE_TASK_SCHEDULER_SLEEP_MS);
-
+                jobCtx.enqueueReduceTask(task);
+                JmrUtils.sleep(JMRConstants.REDUCE_TASK_SCHEDULER_SLEEP_MS);
             }
-
         }
     }
 
     static <D extends Serializable, V extends Serializable, O extends Serializable> Optional<AssignedReduceTasks> tryAssignReduceTask(
-            UnassignedReduceTasks task, List<Worker> workers, List<AssignedReduceTasks> assignedReduceTasks, JobConfiguration<D, V, O> jobConfig) {
+            final UnassignedReduceTasks task, final List<Worker> workers, final List<AssignedReduceTasks> assignedReduceTasks,
+            final JobConfiguration<D, V, O> jobConfig) {
         final Set<Worker> busy = assignedReduceTasks.stream().map(AssignedReduceTasks::worker).collect(Collectors.toSet());
-        for (final Worker worker : workers) {
+        for (Worker worker : workers) {
             if (busy.contains(worker)) {
-                JMRLog.debug(LOGGER, "Worker {} is busy, skipping for reduce task {}", worker.getWorkerId(), task.taskId());
                 continue;
             }
 
@@ -541,99 +647,161 @@ public class MasterExecutor implements Runnable {
         return Optional.empty();
     }
 
-    private static void monitorAssignedMapTasks(final List<UnassignedMapTasks> mapTasks, final List<AssignedMapTasks> assignedTasks,
-            final List<CompletedMapTasks> completedTasks, final Queue<UnassignedMapTasks> unassignedQueue, final AtomicBoolean stopForError) {
-        while (!stopForError.get() && completedTasks.size() < mapTasks.size()) {
-            JMRLog.debug(LOGGER, "Monitoring assigned tasks: {} completed out of {}", completedTasks.size(), mapTasks.size());
-            final List<AssignedMapTasks> toRemove = new ArrayList<>();
+    private static void monitorAssignedMapTasks(final JobInfoInternal jobInfo, final JobExecutionContext<?> jobCtx,
+            final AtomicBoolean stopForError) {
+        final int totalTasks = jobCtx.originalMapTasks.size();
+        int lastLoggedPercentage = -1;
 
-            for (final AssignedMapTasks assigned : assignedTasks) {
+        while (!stopForError.get() && !jobInfo.isCancellationRequested() && jobCtx.completedMapTasks.size() < jobCtx.originalMapTasks.size()) {
+            final int currentCompleted = jobCtx.completedMapTasks.size();
+            final int currentPercentage = totalTasks > 0 ? (currentCompleted * 100 / totalTasks) : 100;
+            jobInfo.setMapProgress(currentPercentage);
+
+            if (currentPercentage >= lastLoggedPercentage + 2) {
+                JMRLog.info(LOGGER, "Map Progress: {}% ({} su {} task completati)", currentPercentage, currentCompleted, totalTasks);
+                lastLoggedPercentage = currentPercentage;
+            }
+
+            final List<AssignedMapTasks> toRemove = new ArrayList<>();
+            for (AssignedMapTasks assigned : jobCtx.assignedMapTasks) {
                 try {
                     final Pair<WorkerTaskStatus, List<IntermediateLocation>> statusResponse = assigned.worker().getMapTaskStatus(assigned.jobId(),
                             assigned.taskId());
                     final WorkerTaskStatus status = statusResponse.getFirst();
 
                     if (status == WorkerTaskStatus.COMPLETED) {
-                        completedTasks.add(assigned.toCompleted(statusResponse.getSecond()));
+                        addCompletedMapTask(jobCtx, assigned.toCompleted(statusResponse.getSecond()));
+                        jobCtx.mapAttempts.remove(assigned.taskId());
                         toRemove.add(assigned);
-                        JMRLog.debug(LOGGER, "Task {} completed", assigned.taskId());
                     } else if (status == WorkerTaskStatus.FAILED || status == WorkerTaskStatus.MISSING) {
-                        unassignedQueue.offer(assigned.toUnassigned());
                         toRemove.add(assigned);
-                        JMRLog.warn(LOGGER, "Task {} failed or missing, re-queuing", assigned.taskId());
-                    } else {
-                        JMRLog.trace(LOGGER, "Task {} still running", assigned.taskId());
+                        requeueMapTask(jobInfo, jobCtx, assigned.toUnassigned(), stopForError, "state=" + status, true);
                     }
                 } catch (StatusRuntimeException e) {
-                    // gRPC error indicates worker is likely dead - reschedule immediately
-                    JMRLog.warn(LOGGER, "[FAULT-TOLERANCE] gRPC error for task {} on worker {}, re-queuing: {}", assigned.taskId(),
-                            assigned.worker().getWorkerId(), e.getStatus());
-                    unassignedQueue.offer(assigned.toUnassigned());
                     toRemove.add(assigned);
+                    requeueMapTask(jobInfo, jobCtx, assigned.toUnassigned(), stopForError, "gRPC error: " + e.getStatus(), false);
                 }
             }
 
-            assignedTasks.removeAll(toRemove);
+            jobCtx.assignedMapTasks.removeAll(toRemove);
+            JmrUtils.sleep(JMRConstants.MAP_TASK_MONITOR_SLEEP_MS);
+        }
 
-            try {
-                Thread.sleep(JMRConstants.MAP_TASK_MONITOR_SLEEP_MS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                stopForError.set(true);
-                break;
-            }
+        if (!stopForError.get() && !jobInfo.isCancellationRequested()) {
+            jobInfo.setMapProgress(100);
+            JMRLog.info(LOGGER, "Map Progress: 100% ({} su {} task completati)", totalTasks, totalTasks);
         }
     }
 
-    private static <D extends Serializable, V extends Serializable, O extends Serializable> void submitUnassignedMapTasks(List<Worker> workers,
-            final List<AssignedMapTasks> assignedTasks, final Queue<UnassignedMapTasks> unassignedQueue, final AtomicBoolean stopForError,
-            JobConfiguration<D, V, O> jobConfig) {
-        while (!(unassignedQueue.isEmpty() && assignedTasks.isEmpty()) && !stopForError.get()) {
-            final UnassignedMapTasks task = unassignedQueue.poll();
+    private static <D extends Serializable, V extends Serializable, O extends Serializable> void submitUnassignedMapTasks(
+            final JobInfoInternal jobInfo, final List<Worker> workers, final JobExecutionContext<?> jobCtx, final AtomicBoolean stopForError,
+            final int reducePartitionCount, final JobConfiguration<D, V, O> jobConfig) {
+        while (!(jobCtx.unassignedMapQueue.isEmpty() && jobCtx.assignedMapTasks.isEmpty()) && !stopForError.get()
+                && !jobInfo.isCancellationRequested()) {
+            if (workers.isEmpty()) {
+                throw new IllegalStateException("No workers available to execute map tasks");
+            }
+
+            final UnassignedMapTasks task = jobCtx.pollMapTask();
             if (task == null) {
                 JmrUtils.sleep(JMRConstants.MAP_TASK_SCHEDULER_SLEEP_MS);
                 continue;
             }
-            JMRLog.debug(LOGGER, "Starting task assignment process for {}", task.taskId());
 
-            final Optional<AssignedMapTasks> assigned = tryAssignMapTask(task, workers, assignedTasks, jobConfig);
-
+            final Optional<AssignedMapTasks> assigned = tryAssignMapTask(task, workers, jobCtx.assignedMapTasks, reducePartitionCount, jobConfig);
             if (assigned.isPresent()) {
-                JMRLog.debug(LOGGER, "Task {} assigned successfully to {}", task.taskId(),
-                        assigned.get().worker().getAddress() + ":" + assigned.get().worker().getPort());
-                assignedTasks.add(assigned.get());
-
+                jobCtx.assignedMapTasks.add(assigned.get());
+                jobCtx.recordEvent("MAP assigned " + task.taskId() + " to " + assigned.get().worker().getWorkerId());
             } else {
-                JMRLog.debug(LOGGER, "No worker available for task {}", task.taskId());
-                unassignedQueue.offer(task);
+                jobCtx.enqueueMapTask(task);
                 JmrUtils.sleep(JMRConstants.MAP_TASK_SCHEDULER_SLEEP_MS);
-
             }
-
         }
     }
 
-    private static List<Pair<Long, Long>> buildChunks(long dataSize, long chunkSize) {
-        List<Pair<Long, Long>> chunks = new ArrayList<>();
+    private static boolean requeueMapTask(final JobInfoInternal jobInfo, final JobExecutionContext<?> jobCtx, final UnassignedMapTasks task,
+            final AtomicBoolean stopForError, final String reason, final boolean countAttempt) {
+        final boolean requeued = requeueTask(jobInfo, jobCtx.mapAttempts, task.taskId(), stopForError, "MAP", reason, countAttempt,
+                () -> jobCtx.enqueueMapTask(task));
+        jobCtx.recordEvent((requeued ? "MAP re-queued " : "MAP failed permanently ") + task.taskId() + " (" + reason + ")");
+        return requeued;
+    }
+
+    private static boolean requeueReduceTask(final JobInfoInternal jobInfo, final JobExecutionContext<?> jobCtx,
+            final UnassignedReduceTasks task, final AtomicBoolean stopForError, final String reason, final boolean countAttempt) {
+        final boolean requeued = requeueTask(jobInfo, jobCtx.reduceAttempts, task.taskId(), stopForError, "REDUCE", reason, countAttempt,
+                () -> jobCtx.enqueueReduceTask(task));
+        jobCtx.recordEvent((requeued ? "REDUCE re-queued " : "REDUCE failed permanently ") + task.taskId() + " (" + reason + ")");
+        return requeued;
+    }
+
+    private static boolean requeueTask(final JobInfoInternal jobInfo, final Map<String, Integer> attempts, final String taskId,
+            final AtomicBoolean stopForError, final String phase, final String reason, final boolean countAttempt, final Runnable requeueAction) {
+        if (countAttempt) {
+            final int attempt = attempts.merge(taskId, 1, Integer::sum);
+            if (attempt > JMRConstants.MAX_TASK_RETRIES) {
+                stopForError.set(true);
+                failJob(jobInfo, phase + " task " + taskId + " exceeded retry limit. Last cause: " + reason);
+                return false;
+            }
+            JMRLog.warn(LOGGER, "{} task {} failed, retry {}/{} ({})", phase, taskId, attempt, JMRConstants.MAX_TASK_RETRIES, reason);
+        } else {
+            JMRLog.warn(LOGGER, "{} task {} re-queued without consuming a retry ({})", phase, taskId, reason);
+        }
+
+        requeueAction.run();
+        return true;
+    }
+
+    private static void addCompletedMapTask(final JobExecutionContext<?> jobCtx, final CompletedMapTasks completedTask) {
+        jobCtx.completedMapTasks.removeIf(existing -> existing.taskId().equals(completedTask.taskId()));
+        jobCtx.completedMapTasks.add(completedTask);
+        jobCtx.recordEvent("MAP completed " + completedTask.taskId() + " on " + completedTask.worker().getWorkerId());
+    }
+
+    private static <O extends Serializable> void addCompletedReduceTask(final JobExecutionContext<O> jobCtx,
+            final CompletedReduceTasks<O> completedTask) {
+        jobCtx.completedReduceTasks.removeIf(existing -> existing.taskId().equals(completedTask.taskId()));
+        jobCtx.completedReduceTasks.add(completedTask);
+        jobCtx.recordEvent("REDUCE completed " + completedTask.taskId() + " on " + completedTask.worker().getWorkerId());
+    }
+
+    private static <O extends Serializable> byte[] serializeJobResult(final List<CompletedReduceTasks<O>> completedReduceTasks) throws JMRException {
+        try {
+            final ArrayList<Pair<String, O>> finalResult = completedReduceTasks.stream().sorted(Comparator.comparing(CompletedReduceTasks::partitionId))
+                    .flatMap(task -> task.reducedData().stream()).sorted(Comparator.comparing(Pair::getFirst))
+                    .collect(Collectors.toCollection(ArrayList::new));
+            return JmrUtils.serializeObject(finalResult);
+        } catch (IOException e) {
+            throw new JMRException("Error serializing job result", e);
+        }
+    }
+
+    private static List<Pair<Long, Long>> buildChunks(final long dataSize, final long chunkSize) {
+        if (chunkSize <= 0) {
+            throw new IllegalArgumentException("Chunk size must be positive");
+        }
+
+        final List<Pair<Long, Long>> chunks = new ArrayList<>();
         long start = 0;
         while (start < dataSize) {
-            long end = Math.min(start + chunkSize, dataSize);
-            chunks.add(new Pair<>(start, end));
+            final long end = Math.min(start + chunkSize, dataSize);
+            chunks.add(Pair.of(start, end));
             start = end;
         }
         return chunks;
     }
 
     static <D extends Serializable, V extends Serializable, O extends Serializable> Optional<AssignedMapTasks> tryAssignMapTask(
-            UnassignedMapTasks task, List<Worker> workers, List<AssignedMapTasks> assignedTasks, JobConfiguration<D, V, O> jobConfig) {
+            final UnassignedMapTasks task, final List<Worker> workers, final List<AssignedMapTasks> assignedTasks,
+            final int reducePartitionCount, final JobConfiguration<D, V, O> jobConfig) {
         final Set<Worker> busy = assignedTasks.stream().map(AssignedMapTasks::worker).collect(Collectors.toSet());
-        for (final Worker worker : workers) {
+        for (Worker worker : workers) {
             if (busy.contains(worker)) {
-                JMRLog.debug(LOGGER, "Worker {} is busy, skipping for task {}", worker.getWorkerId(), task.taskId());
                 continue;
             }
 
-            final Optional<AssignedMapTasks> result = tryAssignMapTask(task, worker, jobConfig);
+            final Optional<AssignedMapTasks> result = tryAssignMapTask(task, worker, reducePartitionCount, jobConfig);
             if (result.isPresent()) {
                 return result;
             }
@@ -642,12 +810,34 @@ public class MasterExecutor implements Runnable {
     }
 
     static <D extends Serializable, V extends Serializable, O extends Serializable> Optional<AssignedMapTasks> tryAssignMapTask(
-            UnassignedMapTasks task, Worker worker, JobConfiguration<D, V, O> jobConfig) {
+            final UnassignedMapTasks task, final Worker worker, final int reducePartitionCount, final JobConfiguration<D, V, O> jobConfig) {
         final boolean assigned = worker.submitMapTask(task.jobId(), task.taskId(), task.chunks().getFirst().intValue(),
-                (int) (task.chunks().getSecond() - task.chunks().getFirst()), task.jarId(), jobConfig);
+                (int) (task.chunks().getSecond() - task.chunks().getFirst()), task.jarId(), reducePartitionCount, jobConfig);
         if (assigned) {
             return Optional.of(task.toAssigned(worker));
         }
         return Optional.empty();
+    }
+
+    private static PhaseOutcome cancelExecution(final JobInfoInternal jobInfo) {
+        markJobCancelled(jobInfo);
+        return PhaseOutcome.CANCELLED;
+    }
+
+    private static void markJobCancelled(final JobInfoInternal jobInfo) {
+        jobInfo.clearSerializedResult();
+        jobInfo.requestCancellation();
+        LOGGER.info("<<< Job cancelled: {}", jobInfo.getJobId());
+    }
+
+    private static void failJob(final JobInfoInternal jobInfo, final String errorMessage) {
+        if (jobInfo.isCancellationRequested()) {
+            markJobCancelled(jobInfo);
+            return;
+        }
+
+        jobInfo.clearSerializedResult();
+        jobInfo.setStatus(JobStatus.FAILED);
+        jobInfo.setErrorMessage(errorMessage);
     }
 }

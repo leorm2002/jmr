@@ -1,6 +1,5 @@
 package it.jmr.worker;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
 import java.nio.file.Path;
@@ -9,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,10 +37,12 @@ import it.jmr.common.IntermediateDataFetcher;
 public class WorkerServer implements IntermediateDataFetcher {
     private static final Logger LOGGER = LoggerFactory.getLogger(WorkerServer.class);
     private final Server server;
+    private final WorkerDashboardHttpServer dashboardServer;
     final WorkerContext ctx;
     private HealthStatusManager healthStatusManager;
     private final Map<String, ManagedChannel> channels = new ConcurrentHashMap<>();
     private final Map<String, WorkerServiceGrpc.WorkerServiceBlockingStub> blockingStubs = new ConcurrentHashMap<>();
+    private final AtomicBoolean stopped = new AtomicBoolean(false);
 
     private final ResourceUploadedCallback dummyCallback = new ResourceUploadedCallback() {
         @Override
@@ -71,6 +73,11 @@ public class WorkerServer implements IntermediateDataFetcher {
                 .addService(new JobServiceImpl(jobStorageDir, ctx.jobStorage, dummyCallback))//
                 .addService(healthStatusManager.getHealthService()) // Add health service
                 .maxInboundMessageSize(JMRConstants.MAX_INBOUND_MESSAGE_SIZE).build();
+        try {
+            this.dashboardServer = new WorkerDashboardHttpServer(port + 1000, ctx);
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException("Failed to start worker dashboard HTTP server", e);
+        }
 
         // Set health status
         healthStatusManager.setStatus(JMRConstants.HEALTH_SERVICE_NAME, HealthCheckResponse.ServingStatus.SERVING);
@@ -78,30 +85,34 @@ public class WorkerServer implements IntermediateDataFetcher {
 
     public void start() throws IOException {
         server.start();
+        dashboardServer.start();
         LOGGER.info("╔════════════════════════════════════════╗");
         LOGGER.info("║            jMR   Worker Node           ║");
         LOGGER.info("╚════════════════════════════════════════╝");
         LOGGER.info("Worker ID:    {}", ctx.workerId);
         LOGGER.info("Port:         {}", ctx.port);
+        LOGGER.info("Dashboard:    http://localhost:{}", ctx.port + 1000);
         LOGGER.info("Jar Storage:  {}", ctx.jarStorageDir.toAbsolutePath().toString());
         LOGGER.info("Job Storage:  {}", ctx.jobStorageDir.toAbsolutePath().toString());
         LOGGER.info("\nWorker ready to receive tasks...\n");
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-
-            LOGGER.info("\nDeleting files...");
-            JmrUtils.deleteFolder(ctx.jarStorageDir);
-            JmrUtils.deleteFolder(ctx.jobStorageDir);
-            LOGGER.info("\nShutting down worker...");
             WorkerServer.this.stop();
         }));
     }
 
     public void stop() {
+        if (!stopped.compareAndSet(false, true)) {
+            return;
+        }
+
         if (server != null) {
             JMRLog.debug(LOGGER, "Shutting down health service...");
             healthStatusManager.enterTerminalState();
             server.shutdown();
+        }
+        if (dashboardServer != null) {
+            dashboardServer.stop();
         }
         JMRLog.debug(LOGGER, "Shutting down gRPC channels...");
         for (ManagedChannel channel : channels.values()) {
@@ -112,6 +123,11 @@ public class WorkerServer implements IntermediateDataFetcher {
                 Thread.currentThread().interrupt();
             }
         }
+
+        ctx.clearRuntimeState();
+        JMRLog.debug(LOGGER, "Deleting worker storage...");
+        JmrUtils.deleteFolder(ctx.jarStorageDir);
+        JmrUtils.deleteFolder(ctx.jobStorageDir);
     }
 
     public void blockUntilShutdown() throws InterruptedException {
@@ -153,13 +169,13 @@ public class WorkerServer implements IntermediateDataFetcher {
         WorkerServiceGrpc.WorkerServiceBlockingStub stub = getOrCreateBlockingStub(host, port);
         FetchIntermediateDataRequest request = FetchIntermediateDataRequest.newBuilder().setTaskId(taskId).setPartitionId(partitionId).build();
 
-        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+        try (java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream()) {
             Iterator<IntermediateDataChunk> chunks = stub.fetchIntermediateData(request);
             while (chunks.hasNext()) {
                 IntermediateDataChunk chunk = chunks.next();
                 baos.write(chunk.getData().toByteArray());
             }
-            return JmrUtils.deserialize(baos.toByteArray());
+            return JmrUtils.deserialize(JmrUtils.gunzip(baos.toByteArray()));
         } catch (IOException | ClassNotFoundException e) {
             throw new JMRException("Error fetching remote intermediate data", e);
         }

@@ -1,6 +1,10 @@
 package it.jmr.worker.models;
 
 import java.nio.file.Path;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 import it.jmr.common.WorkerTaskStatus;
@@ -12,6 +16,11 @@ import it.jmr.worker.storage.IntermediateStorage;
  * framework.
  */
 public class WorkerContext {
+    private static final int MAX_EVENTS = 200;
+
+    public record DashboardEvent(long timestamp, String message) {
+    }
+
     public boolean busy = false;
     public final IntermediateStorage intermediateStorage;
     public final String workerId;
@@ -23,6 +32,7 @@ public class WorkerContext {
     public final ConcurrentHashMap<Pair<String, String>, WorkerTaskStatus> statusMap;
     public final ConcurrentHashMap<Pair<String, String>, TaskResult> mapTaskResults = new ConcurrentHashMap<>();
     public final ConcurrentHashMap<Pair<String, String>, ReduceTaskResult> reduceTaskResults = new ConcurrentHashMap<>();
+    private final Deque<DashboardEvent> dashboardEvents;
 
     public WorkerContext(IntermediateStorage intermediateStorage, String workerId, Path jarStorageDir, Path jobStorageDir, int port) {
         this.intermediateStorage = intermediateStorage;
@@ -33,6 +43,31 @@ public class WorkerContext {
         this.jarStorageDir = jarStorageDir;
         this.jobStorageDir = jobStorageDir;
         this.port = port;
+        this.dashboardEvents = new ArrayDeque<>();
+    }
+
+    public synchronized void recordEvent(final String message) {
+        if (dashboardEvents.size() >= MAX_EVENTS) {
+            dashboardEvents.removeFirst();
+        }
+        dashboardEvents.addLast(new DashboardEvent(System.currentTimeMillis(), message));
+    }
+
+    public synchronized List<DashboardEvent> getDashboardEvents() {
+        return new ArrayList<>(dashboardEvents);
+    }
+
+    public void clearRuntimeState() {
+        busy = false;
+        statusMap.clear();
+        mapTaskResults.clear();
+        reduceTaskResults.clear();
+        jarStorage.clear();
+        jobStorage.clear();
+        intermediateStorage.clear();
+        synchronized (this) {
+            dashboardEvents.clear();
+        }
     }
 
 }

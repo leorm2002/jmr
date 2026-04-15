@@ -120,6 +120,7 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         final String taskId = request.getTaskId();
 
         JMRLog.info(LOGGER, "\n>>> Received MAP task: {} for job: {}", taskId, jobId);
+        workerNode.recordEvent("MAP received " + taskId + " for job " + jobId);
 
         // 1. Controllo Busy e Rifiuto Immediato
         if (this.workerNode.busy) {
@@ -164,12 +165,14 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
                 final TaskResult taskResult = new TaskResult(jobId, taskId, partitionInfos, executionTime);
                 workerNode.mapTaskResults.put(Pair.of(jobId, taskId), taskResult);
                 workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.COMPLETED);
+                workerNode.recordEvent("MAP completed " + taskId + " in " + executionTime + "ms");
 
                 JMRLog.info(LOGGER, "<<< MAP task completed: {} ({}ms)", taskId, executionTime);
 
             } catch (Exception e) {
                 JMRLog.error(LOGGER, "Error during ASYNC MAP execution: " + taskId, e);
                 workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.FAILED);
+                workerNode.recordEvent("MAP failed " + taskId + ": " + e.getClass().getSimpleName());
             } finally {
                 // Rilascia il worker per nuovi task
                 this.workerNode.busy = false;
@@ -184,6 +187,7 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
 
         JMRLog.info(LOGGER, "\n>>> Received REDUCE task: {} for job: {}", taskId, jobId);
         JMRLog.info(LOGGER, "    Partition: {}", request.getPartitionId());
+        workerNode.recordEvent("REDUCE received " + taskId + " for partition " + request.getPartitionId());
 
         // 1. Controllo Busy
         if (this.workerNode.busy) {
@@ -218,12 +222,14 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
                 final ReduceTaskResult taskResult = new ReduceTaskResult(jobId, taskId, reducedData, executionTime);
                 workerNode.reduceTaskResults.put(Pair.of(jobId, taskId), taskResult);
                 workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.COMPLETED);
+                workerNode.recordEvent("REDUCE completed " + taskId + " in " + executionTime + "ms");
 
                 JMRLog.info(LOGGER, "<<< REDUCE task completed: {} ({}ms)", taskId, executionTime);
 
             } catch (Exception e) {
                 JMRLog.error(LOGGER, "Error in ASYNC REDUCE task: " + taskId, e);
                 workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.FAILED);
+                workerNode.recordEvent("REDUCE failed " + taskId + ": " + e.getClass().getSimpleName());
             } finally {
                 // Rilascia il worker
                 this.workerNode.busy = false;
@@ -301,15 +307,7 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         try {
             final List<Serializable> data = workerNode.intermediateStorage.getPartitionData(request.getTaskId(), request.getPartitionId());
 
-            // Serialize the list into a ByteArrayOutputStream
-            final ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            try (ObjectOutputStream oos = new ObjectOutputStream(baos)) {
-                oos.writeObject(data);
-                oos.flush();
-            }
-
-            // Convert to byte array
-            byte[] serializedData = baos.toByteArray();
+            final byte[] serializedData = JmrUtils.gzip(JmrUtils.serializeObject(new ArrayList<>(data)));
 
             // Send the data in chunks
             int chunkSize = 64 * 1024; // 64KB
