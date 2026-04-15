@@ -59,7 +59,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>it.mapreduce.client.MapReduceClient</mainClass>
+                            <mainClass>it.jmr.client.InteractiveClient</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
@@ -75,7 +75,7 @@
                     </descriptorRefs>
                     <archive>
                         <manifest>
-                            <mainClass>it.jmr.client.MapReduceClient</mainClass>
+                            <mainClass>it.jmr.client.InteractiveClient</mainClass>
                         </manifest>
                     </archive>
                 </configuration>

@@ -63,7 +63,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>it.jmr.master.MapReduceMaster</mainClass>
+                            <mainClass>it.jmr.master.MasterLauncher</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
