@@ -16,7 +16,7 @@ public class MyWcJob {
     public static void main(String[] args) throws InterruptedException, JMRException {
 
         if (args.length != 4) {
-            System.err.println("Usage: MyWcJob <books-data-path> <jar-path> <host> <port>");
+            System.err.println("Usage: MyWcJob <serialized-books-data-path> <jar-path> <host> <port>");
 
             System.out.println("Received parameters:");
             for (int i = 0; i < args.length; i++) {
@@ -31,13 +31,17 @@ public class MyWcJob {
         final int port = Integer.parseInt(args[3]);
 
         // Creo il mio grpc data provider server
-        List<Path> books = new ArrayList<>();
-        Path booksFolder = Path.of(booksPath);
+        final List<Path> books = new ArrayList<>();
+        final Path booksFolder = Path.of(booksPath);
         try (var paths = java.nio.file.Files.list(booksFolder)) {
-            paths.filter(java.nio.file.Files::isRegularFile).forEach(books::add);
+            paths.filter(java.nio.file.Files::isRegularFile).filter(path -> path.toString().endsWith(".ser")).forEach(books::add);
         } catch (Exception e) {
             throw new RuntimeException("Failed to list book files in folder: " + booksFolder, e);
         }
+        if (books.isEmpty()) {
+            throw new IllegalArgumentException("No serialized .ser files found in folder: " + booksFolder);
+        }
+
         final LocalGrpcDataProvider<String> dataProviderServer = new LocalGrpcDataProvider<>(books);
 
         // Configuro e lancio il job di MapReduce
@@ -58,23 +62,39 @@ public class MyWcJob {
                     return new Pair<>(entr, sum);
                 });
 
-        try (final JMRClient jmrClient = new it.jmr.client.JMRClient(host, port)) {
-            // Invio il mio job al cluster
-            jmrClient.submit(jarPath, job);
+        try {
+            final JMRClient jmrClient = new it.jmr.client.JMRClient(host, port);
+            try {
+                // Invio il mio job al cluster
+                jmrClient.submit(jarPath, job);
 
-            while (true) {
-                final String status = jmrClient.getJobStatus();
-                System.out.println("Job status: " + status);
-                Thread.sleep(10000); // Attendi 10 secondi prima di controllare di nuovo
+                while (true) {
+                    final String status = jmrClient.getJobStatus();
+                    System.out.println("Job status: " + status);
+                    Thread.sleep(10000); // Attendi 10 secondi prima di controllare di nuovo
 
-                if ("COMPLETED".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status)) {
-                    break;
+                    if ("COMPLETED".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status)) {
+                        break;
+                    }
                 }
+            } finally {
+                closeClient(jmrClient);
             }
         } catch (InterruptedException e) {
             throw e;
+        } finally {
+            dataProviderServer.close();
+        }
+    }
+
+    private static void closeClient(final JMRClient jmrClient) throws InterruptedException, JMRException {
+        try {
+            jmrClient.close();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
         } catch (Exception e) {
-            e.printStackTrace();
+            throw new JMRException("Failed to close JMR client", e);
         }
     }
 

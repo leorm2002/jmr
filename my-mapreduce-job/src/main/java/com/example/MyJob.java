@@ -22,12 +22,8 @@ public class MyJob implements JobConfiguration<String, Integer, Integer> {
 
     @Override
     public SerializableReducer<Integer, Integer> getReducer() {
-        try {
-            Thread.sleep(5000);
-        } catch (InterruptedException e) {
-        }
         return (key, values) -> {
-            int sum = values.stream().mapToInt(Integer::intValue).sum();
+            final int sum = values.stream().mapToInt(Integer::intValue).sum();
             return Pair.of(key, sum);
         };
     }
