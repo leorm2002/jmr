@@ -50,6 +50,15 @@ public class MapReduceClient implements AutoCloseable {
         }
     }
 
+    public String uploadJob(Path jobPath) throws JMRException {
+        try {
+            LOGGER.info("Uploading serialized job: {}", jobPath);
+            return JobServiceClient.uploadJobFromFile(jobPath, jobAsyncStub).getJobId();
+        } catch (JMRException | InterruptedException e) {
+            throw new JMRException("Failed to upload job", e);
+        }
+    }
+
     public String submitJob(String jarId, String jobId) throws JMRException {
         LOGGER.info("Submitting job with jarId: {} and jobId: {}", jarId, jobId);
         final SubmitJobRequest.Builder requestBuilder = SubmitJobRequest.newBuilder().setJarId(jarId).setJobId(jobId);
@@ -63,6 +72,12 @@ public class MapReduceClient implements AutoCloseable {
         LOGGER.info("Job submitted successfully!");
         LOGGER.info("Job ID: {}", response.getJobId());
         return response.getJobId();
+    }
+
+    public String submit(Path jarPath, Path jobPath) throws JMRException {
+        final String jarId = uploadJar(jarPath);
+        final String jobId = uploadJob(jobPath);
+        return submitJob(jarId, jobId);
     }
 
     public String getJobStatus(String jobId) {

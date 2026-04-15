@@ -102,6 +102,9 @@ public class LocalGrpcDataProviderClient<D extends Serializable> implements Data
             } catch (InterruptedException e) {
                 channel.shutdownNow();
                 Thread.currentThread().interrupt();
+            } finally {
+                blockingStub = null;
+                channel = null;
             }
         }
     }

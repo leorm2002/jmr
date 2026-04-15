@@ -11,8 +11,9 @@ import it.jmr.common.exceptions.JMRException;
 public class InteractiveClient {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(InteractiveClient.class);
+    private static final long MONITOR_POLL_INTERVAL_MS = 2_000L;
 
-    private static void handleCommand(String line, MapReduceClient client) {
+    private static void handleCommand(final String line, final MapReduceClient client) {
         final String[] parts = line.trim().split("\\s+");
         if (parts.length == 0 || parts[0].isEmpty()) {
             return;
@@ -24,14 +25,14 @@ public class InteractiveClient {
             switch (command) {
             case "submit":
                 if (parts.length < 3) {
-                    LOGGER.error("Usage: submit <jar-path> <main-class> [job-args...]");
+                    LOGGER.error("Usage: submit <jar-path> <serialized-job-path>");
                     break;
                 }
+
                 final Path jarPath = Path.of(parts[1]);
-                final String mainClass = parts[2];
-                final String jarId = client.uploadJar(jarPath);
-                final String jobId = client.submitJob(jarId, mainClass);
-                LOGGER.info("\n✓ Job submitted: " + jobId);
+                final Path jobPath = Path.of(parts[2]);
+                final String jobId = client.submit(jarPath, jobPath);
+                LOGGER.info("Job submitted: {}", jobId);
                 break;
 
             case "status":
@@ -39,28 +40,59 @@ public class InteractiveClient {
                     LOGGER.error("Usage: status <job-id>");
                     break;
                 }
-                client.getJobStatus(parts[1]);
+
+                LOGGER.info("Job {} status: {}", parts[1], client.getJobStatus(parts[1]));
                 break;
 
             case "list":
                 client.listJobs();
                 break;
+
+            case "monitor":
+                if (parts.length < 2) {
+                    LOGGER.error("Usage: monitor <job-id>");
+                    break;
+                }
+
+                monitorJob(parts[1], client);
+                break;
+
             case "help":
                 printHelp();
                 break;
 
             default:
-                LOGGER.error("Unknown command: " + command);
+                LOGGER.error("Unknown command: {}", command);
                 printHelp();
                 break;
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOGGER.error("Command interrupted", e);
         } catch (JMRException e) {
-            LOGGER.error("Error executing command: " + e.getMessage(), e);
+            LOGGER.error("Error executing command: {}", e.getMessage(), e);
         }
     }
 
+    private static void monitorJob(final String jobId, final MapReduceClient client) throws InterruptedException {
+        while (!Thread.currentThread().isInterrupted()) {
+            final String status = client.getJobStatus(jobId);
+            LOGGER.info("Job {} status: {}", jobId, status);
+
+            if (isTerminalStatus(status)) {
+                return;
+            }
+
+            Thread.sleep(MONITOR_POLL_INTERVAL_MS);
+        }
+    }
+
+    private static boolean isTerminalStatus(final String status) {
+        return "COMPLETED".equals(status) || "FAILED".equals(status) || "CANCELLED".equals(status) || "Job not found.".equals(status);
+    }
+
     private static void printHelp() {
-        LOGGER.info("\nAvailable commands:\n" + "  submit <jar-path> <main-class> [job-args...]  - Submits a job\n"
+        LOGGER.info("\nAvailable commands:\n" + "  submit <jar-path> <serialized-job-path>       - Submits a job\n"
                 + "  status <job-id>                               - Gets the status of a job\n"
                 + "  list                                          - Lists all jobs\n"
                 + "  monitor <job-id>                              - Monitors a job in real time\n"
@@ -68,23 +100,23 @@ public class InteractiveClient {
                 + "  exit | quit                                   - Exits the client\n");
     }
 
-    public static void main(String[] args) {
+    public static void main(final String[] args) {
         if (args.length != 2) {
             LOGGER.error("Usage: java -jar mapreduce-client.jar <master-host> <master-port>");
             LOGGER.error("After startup, use 'help' for the list of interactive commands.");
             return;
         }
 
-        String host = args[0];
-        int port = Integer.parseInt(args[1]);
+        final String host = args[0];
+        final int port = Integer.parseInt(args[1]);
 
-        try (Scanner scanner = new Scanner(System.in)) {
-            try (MapReduceClient client = new MapReduceClient(host, port)) {
+        try (final Scanner scanner = new Scanner(System.in)) {
+            try (final MapReduceClient client = new MapReduceClient(host, port)) {
                 LOGGER.info("Connected to {}:{}. Type 'help' for commands or 'exit' to quit.", host, port);
 
                 while (true) {
                     System.out.print("mapreduce-client> ");
-                    String line = scanner.nextLine();
+                    final String line = scanner.nextLine();
 
                     if ("exit".equalsIgnoreCase(line) || "quit".equalsIgnoreCase(line)) {
                         break;
@@ -94,7 +126,7 @@ public class InteractiveClient {
                 }
 
             } catch (Exception e) {
-                LOGGER.error("Critical client error: " + e.getMessage(), e);
+                LOGGER.error("Critical client error: {}", e.getMessage(), e);
             }
         }
         LOGGER.info("Client terminated.");

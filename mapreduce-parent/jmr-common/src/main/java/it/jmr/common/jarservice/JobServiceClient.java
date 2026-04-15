@@ -131,6 +131,15 @@ public class JobServiceClient {
      * Uploads a job from a file (raw bytes) to a worker without deserializing. This
      * is used by the master to forward job files to workers.
      */
+    public static JobUploadResult uploadJobFromFile(Path jobFilePath, JobServiceGrpc.JobServiceStub jobAsyncStub)
+            throws JMRException, InterruptedException {
+        return uploadJobFromFile(jobFilePath, null, jobAsyncStub);
+    }
+
+    /**
+     * Uploads a job from a file (raw bytes) to a worker without deserializing. This
+     * is used by the master to forward job files to workers.
+     */
     public static JobUploadResult uploadJobFromFile(Path jobFilePath, String jobId, JobServiceGrpc.JobServiceStub jobAsyncStub)
             throws JMRException, InterruptedException {
 
@@ -140,11 +149,13 @@ public class JobServiceClient {
         }
 
         final CountDownLatch finishLatch = new CountDownLatch(1);
+        final AtomicReference<String> returnedJobId = new AtomicReference<>();
         final AtomicReference<Exception> exception = new AtomicReference<>();
 
         StreamObserver<UploadJobResponse> responseObserver = new StreamObserver<>() {
             @Override
             public void onNext(UploadJobResponse response) {
+                returnedJobId.set(response.getJobId());
                 JMRLog.info(LOGGER, "Job file uploaded successfully - ID: {} - {}", response.getJobId(), response.getMessage());
             }
 
@@ -173,7 +184,12 @@ public class JobServiceClient {
             JMRLog.info(LOGGER, "Starting job file upload: {} ({} bytes)", jobFile.getName(), totalSize);
 
             while ((bytesRead = fis.read(buffer)) != -1) {
-                JobChunk chunk = JobChunk.newBuilder().setContent(ByteString.copyFrom(buffer, 0, bytesRead)).setJobId(jobId).build();
+                final JobChunk.Builder chunkBuilder = JobChunk.newBuilder().setContent(ByteString.copyFrom(buffer, 0, bytesRead));
+                if (jobId != null && !jobId.isBlank()) {
+                    chunkBuilder.setJobId(jobId);
+                }
+
+                final JobChunk chunk = chunkBuilder.build();
 
                 requestObserver.onNext(chunk);
                 uploadedBytes += bytesRead;
@@ -202,6 +218,11 @@ public class JobServiceClient {
             throw new JMRException(exception.get().getMessage(), exception.get());
         }
 
-        return new JobUploadResult(jobId);
+        if (returnedJobId.get() == null) {
+            JMRLog.error(LOGGER, "Upload completed but no Job ID received");
+            throw new JMRException("No Job ID received from server");
+        }
+
+        return new JobUploadResult(returnedJobId.get());
     }
 }
