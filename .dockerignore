@@ -1,0 +1,14 @@
+.git
+.claude
+.vscode
+.idea
+logs
+report
+master-data
+worker-data
+docker-output
+**/target/*
+!mapreduce-parent/jmr-master/target/jmr-master-1.0-SNAPSHOT-jar-with-dependencies.jar
+!mapreduce-parent/jmr-worker/target/jmr-worker-1.0-SNAPSHOT-jar-with-dependencies.jar
+!my-mapreduce-job/target/my-mapreduce-job-1.0-SNAPSHOT-jar-with-dependencies.jar
+data/raw_data

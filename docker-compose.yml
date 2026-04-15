@@ -1,0 +1,120 @@
+x-jmr-runtime: &jmr-runtime
+  image: jmr-runtime:local
+  build:
+    context: .
+    dockerfile: docker/jmr-runtime/Dockerfile
+  networks:
+    - jmr
+
+services:
+  worker-a:
+    <<: *jmr-runtime
+    container_name: jmr-worker-a
+    command:
+      - -cp
+      - /opt/jmr/jmr-worker.jar
+      - it.jmr.worker.StaticWorkerLauncher
+      - --workerId
+      - worker-a
+      - --port
+      - "50051"
+      - --storageDirectory
+      - /var/lib/jmr
+    volumes:
+      - worker-a-storage:/var/lib/jmr
+    restart: unless-stopped
+
+  worker-b:
+    <<: *jmr-runtime
+    container_name: jmr-worker-b
+    command:
+      - -cp
+      - /opt/jmr/jmr-worker.jar
+      - it.jmr.worker.StaticWorkerLauncher
+      - --workerId
+      - worker-b
+      - --port
+      - "50052"
+      - --storageDirectory
+      - /var/lib/jmr
+    volumes:
+      - worker-b-storage:/var/lib/jmr
+    restart: unless-stopped
+
+  worker-c:
+    <<: *jmr-runtime
+    container_name: jmr-worker-c
+    command:
+      - -cp
+      - /opt/jmr/jmr-worker.jar
+      - it.jmr.worker.StaticWorkerLauncher
+      - --workerId
+      - worker-c
+      - --port
+      - "50053"
+      - --storageDirectory
+      - /var/lib/jmr
+    volumes:
+      - worker-c-storage:/var/lib/jmr
+    restart: unless-stopped
+
+  master:
+    <<: *jmr-runtime
+    container_name: jmr-master
+    command:
+      - -cp
+      - /opt/jmr/jmr-master.jar
+      - it.jmr.master.StaticMasterLauncher
+      - --port
+      - "50050"
+      - --storageDirectory
+      - /var/lib/jmr
+      - --worker
+      - worker-a:worker-a:50051
+      - --worker
+      - worker-b:worker-b:50052
+      - --worker
+      - worker-c:worker-c:50053
+    depends_on:
+      - worker-a
+      - worker-b
+      - worker-c
+    ports:
+      - "50050:50050"
+    volumes:
+      - master-storage:/var/lib/jmr
+    restart: unless-stopped
+
+  submitter:
+    <<: *jmr-runtime
+    container_name: jmr-submitter
+    command:
+      - -Dlog4j.configurationFile=file:/opt/jmr/config/submitter-log4j2.xml
+      - -Dlog4j2.statusLoggerLevel=WARN
+      - -cp
+      - /opt/jmr/my-mapreduce-job.jar
+      - com.example.MyWcJob
+      - /opt/jmr/data/serialized_data
+      - /opt/jmr/my-mapreduce-job.jar
+      - master
+      - "50050"
+      - submitter
+      - /outputs/wordcount-result.ser
+    depends_on:
+      - master
+      - worker-a
+      - worker-b
+      - worker-c
+    restart: "no"
+    volumes:
+      - ./docker-output:/outputs
+
+networks:
+  jmr:
+    name: jmr-network
+
+volumes:
+  master-storage:
+  worker-a-storage:
+  worker-b-storage:
+  worker-c-storage:
