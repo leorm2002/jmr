@@ -27,6 +27,25 @@ public class MasterServer implements AutoCloseable {
         this.ctx = new MasterContext(port, rootStoragePath, jarStorageDirectory, jobStorageDirectory, workers);
         this.stopped = new AtomicBoolean(false);
 
+        // Add log appender for dashboard
+        org.apache.logging.log4j.core.LoggerContext lc = (org.apache.logging.log4j.core.LoggerContext) org.apache.logging.log4j.LogManager
+                .getContext(false);
+        org.apache.logging.log4j.core.config.Configuration config = lc.getConfiguration();
+        org.apache.logging.log4j.core.layout.PatternLayout layout = org.apache.logging.log4j.core.layout.PatternLayout.newBuilder()
+                .withPattern("%d{HH:mm:ss} %-5level %logger{15} - %msg").build();
+        org.apache.logging.log4j.core.Appender appender = new org.apache.logging.log4j.core.appender.AbstractAppender(
+                "DashboardAppender-" + System.currentTimeMillis(), null, layout, false, org.apache.logging.log4j.core.config.Property.EMPTY_ARRAY) {
+            @Override
+            public void append(org.apache.logging.log4j.core.LogEvent event) {
+                String message = new String(getLayout().toByteArray(event)).trim();
+                ctx.recordLog(message);
+            }
+        };
+        appender.start();
+        config.addAppender(appender);
+        lc.getRootLogger().addAppender(config.getAppender(appender.getName()));
+        lc.updateLoggers();
+
         jarStorageDirectory.toFile().mkdirs();
         JMRLog.debug(LOGGER, "JAR storage directory: {}", jarStorageDirectory.toString());
 
@@ -47,7 +66,7 @@ public class MasterServer implements AutoCloseable {
                 .addService(new JarServiceImpl(jarStorageDirectory, ctx.jarsPaths, resourceDistributor))
                 // Handles the Jobs uploaded from the client
                 .addService(new JobServiceImpl(jobStorageDirectory, ctx.jobsPaths, resourceDistributor)) //
-                .maxInboundMessageSize(100 * 1024 * 1024) // 100MB
+                .maxInboundMessageSize(100 * 1024 * 1024 * 1024) // 100MB
                 .build();
         try {
             this.dashboardServer = new MasterDashboardHttpServer(port + 1000, ctx);

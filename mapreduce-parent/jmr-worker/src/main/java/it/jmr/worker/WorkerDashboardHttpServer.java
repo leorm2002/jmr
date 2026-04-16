@@ -120,6 +120,20 @@ class WorkerDashboardHttpServer implements AutoCloseable {
             json.append("\"message\":\"").append(escape(event.message())).append("\"");
             json.append("}");
         }
+        json.append("],");
+
+        json.append("\"logs\":[");
+        final List<WorkerContext.DashboardEvent> logs = ctx.getLogEvents();
+        for (int index = 0; index < logs.size(); index++) {
+            final WorkerContext.DashboardEvent logEvent = logs.get(index);
+            if (index > 0) {
+                json.append(",");
+            }
+            json.append("{");
+            json.append("\"timestamp\":\"").append(escape(Instant.ofEpochMilli(logEvent.timestamp()).toString())).append("\",");
+            json.append("\"message\":\"").append(escape(logEvent.message())).append("\"");
+            json.append("}");
+        }
         json.append("]");
         json.append("}");
         return json.toString();
@@ -156,6 +170,7 @@ class WorkerDashboardHttpServer implements AutoCloseable {
                 .panel { border:2px outset #fff; background:#d4d0c8; padding:8px; }
                 .metric { font-size:26px; font-weight:bold; margin-top:4px; }
                 .muted { color:#333; }
+                .events { max-height:360px; overflow:auto; background:#fff; border:1px solid #000; padding:4px; }
                 .event { padding:4px 0; border-bottom:1px dotted #666; }
                 table { width:100%; border-collapse:collapse; background:#fff; }
                 th { background:#000080; color:#fff; text-align:left; padding:4px; border:1px solid #000; }
@@ -183,7 +198,7 @@ class WorkerDashboardHttpServer implements AutoCloseable {
                   </div>
                   <div class="panel">
                     <h2>RECENT EVENTS</h2>
-                    <div id="events"></div>
+                    <div class="events" id="events"></div>
                   </div>
                 </section>
                 <section class="row" style="margin-top:16px;">
@@ -194,6 +209,12 @@ class WorkerDashboardHttpServer implements AutoCloseable {
                   <div class="panel">
                     <h2>RECENT REDUCE TASKS</h2>
                     <table><thead><tr><th>Task</th><th>Ms</th><th>Records</th></tr></thead><tbody id="recentReduceTasks"></tbody></table>
+                  </div>
+                </section>
+                <section class="row" style="margin-top:16px;">
+                  <div class="panel" style="grid-column: 1 / -1;">
+                    <h2>SYSTEM LOGS</h2>
+                    <div class="events" id="logs" style="height:250px"></div>
                   </div>
                 </section>
               </main>
@@ -216,6 +237,9 @@ class WorkerDashboardHttpServer implements AutoCloseable {
                   ).join('');
                   document.getElementById('recentReduceTasks').innerHTML = state.recentReduceTasks.map(task =>
                     `<tr><td>${task.taskId}</td><td>${task.executionTime}</td><td>${task.records}</td></tr>`
+                  ).join('');
+                  document.getElementById('logs').innerHTML = state.logs.slice().reverse().map(event =>
+                    `<div class="event"><div class="muted">${event.timestamp}</div><div><pre style="margin:0">${event.message}</pre></div></div>`
                   ).join('');
                 }
                 refresh();

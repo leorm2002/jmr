@@ -170,7 +170,8 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
                 JMRLog.info(LOGGER, "<<< MAP task completed: {} ({}ms)", taskId, executionTime);
 
             } catch (Exception e) {
-                JMRLog.error(LOGGER, "Error during ASYNC MAP execution: " + taskId, e);
+                JMRLog.error(LOGGER, "Error during ASYNC MAP execution: {}", taskId, e);
+                JMRLog.error(LOGGER, "{}", e);
                 workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.FAILED);
                 workerNode.recordEvent("MAP failed " + taskId + ": " + e.getClass().getSimpleName());
             } finally {
@@ -227,7 +228,8 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
                 JMRLog.info(LOGGER, "<<< REDUCE task completed: {} ({}ms)", taskId, executionTime);
 
             } catch (Exception e) {
-                JMRLog.error(LOGGER, "Error in ASYNC REDUCE task: " + taskId, e);
+                JMRLog.error(LOGGER, "Error in ASYNC REDUCE task: {}", taskId);
+                JMRLog.error(LOGGER, "{}", e);
                 workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.FAILED);
                 workerNode.recordEvent("REDUCE failed " + taskId + ": " + e.getClass().getSimpleName());
             } finally {

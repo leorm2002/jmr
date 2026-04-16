@@ -83,7 +83,8 @@ public class JarServiceClient {
             long totalSize = jarFile.length();
             long uploadedBytes = 0;
 
-            JMRLog.info(LOGGER, "Starting JAR upload: {} ({} bytes){}", jarFile.getName(), totalSize, jarId != null ? " with ID: " + jarId : "");
+            String id = jarId != null ? " with ID: " + jarId : "";
+            JMRLog.info(LOGGER, "Starting JAR upload: {} ({} bytes){}", jarFile.getName(), totalSize, id);
 
             while ((bytesRead = fis.read(buffer)) != -1) {
                 JarChunk.Builder chunkBuilder = JarChunk.newBuilder().setContent(ByteString.copyFrom(buffer, 0, bytesRead))

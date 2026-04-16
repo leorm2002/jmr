@@ -36,6 +36,7 @@ public class MasterContext {
     public final Queue<JobInfoInternal> jobQueue;
     private final List<WorkerFailureListener> workerFailureListeners;
     private final Deque<DashboardEvent> dashboardEvents;
+    private final Deque<DashboardEvent> logEvents;
     private volatile JobInfoInternal activeJob;
     private volatile MasterExecutor.JobExecutionContext<?> activeJobContext;
     private volatile String activePhase;
@@ -52,6 +53,7 @@ public class MasterContext {
         this.workers = (workers.stream().map(Worker::new).collect(Collectors.toCollection(CopyOnWriteArrayList::new)));
         this.workerFailureListeners = new CopyOnWriteArrayList<>();
         this.dashboardEvents = new ArrayDeque<>();
+        this.logEvents = new ArrayDeque<>();
         this.activePhase = "IDLE";
     }
 
@@ -78,6 +80,17 @@ public class MasterContext {
 
     public synchronized List<DashboardEvent> getDashboardEvents() {
         return new ArrayList<>(dashboardEvents);
+    }
+
+    public synchronized void recordLog(final String message) {
+        if (logEvents.size() >= MAX_EVENTS) {
+            logEvents.removeFirst();
+        }
+        logEvents.addLast(new DashboardEvent(System.currentTimeMillis(), message));
+    }
+
+    public synchronized List<DashboardEvent> getLogEvents() {
+        return new ArrayList<>(logEvents);
     }
 
     public void setActiveExecution(final JobInfoInternal jobInfo, final MasterExecutor.JobExecutionContext<?> jobContext, final String phase) {
@@ -117,6 +130,7 @@ public class MasterContext {
         clearActiveExecution();
         synchronized (this) {
             dashboardEvents.clear();
+            logEvents.clear();
         }
     }
 }

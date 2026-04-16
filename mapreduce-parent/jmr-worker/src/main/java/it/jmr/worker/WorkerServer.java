@@ -65,6 +65,22 @@ public class WorkerServer implements IntermediateDataFetcher {
         this.ctx = new WorkerContext(new InMemoryIntermediateStorage(), workerId, jarStorageDir, jobStorageDir, port);
         this.healthStatusManager = new HealthStatusManager();
 
+        // Add log appender for dashboard
+        org.apache.logging.log4j.core.LoggerContext lc = (org.apache.logging.log4j.core.LoggerContext) org.apache.logging.log4j.LogManager.getContext(false);
+        org.apache.logging.log4j.core.config.Configuration config = lc.getConfiguration();
+        org.apache.logging.log4j.core.layout.PatternLayout layout = org.apache.logging.log4j.core.layout.PatternLayout.newBuilder().withPattern("%d{HH:mm:ss} %-5level %logger{15} - %msg").build();
+        org.apache.logging.log4j.core.Appender appender = new org.apache.logging.log4j.core.appender.AbstractAppender("DashboardAppender-" + System.currentTimeMillis(), null, layout, false, org.apache.logging.log4j.core.config.Property.EMPTY_ARRAY) {
+            @Override
+            public void append(org.apache.logging.log4j.core.LogEvent event) {
+                String message = new String(getLayout().toByteArray(event)).trim();
+                ctx.recordLog(message);
+            }
+        };
+        appender.start();
+        config.addAppender(appender);
+        lc.getRootLogger().addAppender(config.getAppender(appender.getName()));
+        lc.updateLoggers();
+
         this.server = ServerBuilder.forPort(port)//
                 .addService(new WorkerServiceImpl(ctx, this))
                 // Handles the uploads of JARs to this worker from the master

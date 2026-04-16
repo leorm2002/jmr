@@ -123,6 +123,20 @@ class MasterDashboardHttpServer implements AutoCloseable {
             json.append("\"message\":\"").append(escape(event.message())).append("\"");
             json.append("}");
         }
+        json.append("],");
+
+        json.append("\"logs\":[");
+        final List<MasterContext.DashboardEvent> logs = ctx.getLogEvents();
+        for (int index = 0; index < logs.size(); index++) {
+            final MasterContext.DashboardEvent logEvent = logs.get(index);
+            if (index > 0) {
+                json.append(",");
+            }
+            json.append("{");
+            json.append("\"timestamp\":\"").append(escape(Instant.ofEpochMilli(logEvent.timestamp()).toString())).append("\",");
+            json.append("\"message\":\"").append(escape(logEvent.message())).append("\"");
+            json.append("}");
+        }
         json.append("]");
         json.append("}");
         return json.toString();
@@ -205,6 +219,12 @@ class MasterDashboardHttpServer implements AutoCloseable {
                     <div class="events" id="events"></div>
                   </div>
                 </section>
+                <section class="row" style="margin-top:16px;">
+                  <div class="panel" style="grid-column: 1 / -1;">
+                    <h2>SYSTEM LOGS</h2>
+                    <div class="events" id="logs" style="height:250px"></div>
+                  </div>
+                </section>
               </main>
               <script>
                 async function refresh() {
@@ -238,6 +258,10 @@ class MasterDashboardHttpServer implements AutoCloseable {
 
                   document.getElementById('events').innerHTML = state.events.slice().reverse().map(event =>
                     `<div class="event"><div class="muted">${event.timestamp}</div><div>${event.message}</div></div>`
+                  ).join('');
+
+                  document.getElementById('logs').innerHTML = state.logs.slice().reverse().map(event =>
+                    `<div class="event"><div class="muted">${event.timestamp}</div><div><pre style="margin:0">${event.message}</pre></div></div>`
                   ).join('');
                 }
                 refresh();

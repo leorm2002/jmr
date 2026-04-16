@@ -33,6 +33,7 @@ public class WorkerContext {
     public final ConcurrentHashMap<Pair<String, String>, TaskResult> mapTaskResults = new ConcurrentHashMap<>();
     public final ConcurrentHashMap<Pair<String, String>, ReduceTaskResult> reduceTaskResults = new ConcurrentHashMap<>();
     private final Deque<DashboardEvent> dashboardEvents;
+    private final Deque<DashboardEvent> logEvents;
 
     public WorkerContext(IntermediateStorage intermediateStorage, String workerId, Path jarStorageDir, Path jobStorageDir, int port) {
         this.intermediateStorage = intermediateStorage;
@@ -44,6 +45,7 @@ public class WorkerContext {
         this.jobStorageDir = jobStorageDir;
         this.port = port;
         this.dashboardEvents = new ArrayDeque<>();
+        this.logEvents = new ArrayDeque<>();
     }
 
     public synchronized void recordEvent(final String message) {
@@ -57,6 +59,17 @@ public class WorkerContext {
         return new ArrayList<>(dashboardEvents);
     }
 
+    public synchronized void recordLog(final String message) {
+        if (logEvents.size() >= MAX_EVENTS) {
+            logEvents.removeFirst();
+        }
+        logEvents.addLast(new DashboardEvent(System.currentTimeMillis(), message));
+    }
+
+    public synchronized List<DashboardEvent> getLogEvents() {
+        return new ArrayList<>(logEvents);
+    }
+
     public void clearRuntimeState() {
         busy = false;
         statusMap.clear();
@@ -67,6 +80,7 @@ public class WorkerContext {
         intermediateStorage.clear();
         synchronized (this) {
             dashboardEvents.clear();
+            logEvents.clear();
         }
     }
 
