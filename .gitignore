@@ -55,6 +55,9 @@ build/
 out/
 bin/
 
+# Python
+__pycache__/
+*.pyc
 
 worker-data/
 master-data/
