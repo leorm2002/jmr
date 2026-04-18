@@ -87,7 +87,7 @@ public class JarServiceImpl extends JarServiceGrpc.JarServiceImplBase {
                     responseObserver.onNext(response);
                     responseObserver.onCompleted();
 
-                } catch (IOException e) {
+                } catch (Exception e) {
                     LOGGER.error("Error completing JAR upload", e);
                     responseObserver.onError(new JMRException("Error completing JAR upload", e));
                 }

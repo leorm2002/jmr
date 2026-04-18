@@ -28,6 +28,7 @@ public class MasterResourceDistributor implements ResourceUploadedCallback {
                 JarServiceClient.uploadJar(jarPath, jarId, worker.getJarAsyncStub());
             } catch (Exception e) {
                 LOGGER.error("Error uploading JAR {} to worker {}: {}", jarId, worker.getWorkerId(), e.getMessage());
+                throw new IllegalStateException("Failed to distribute JAR " + jarId + " to worker " + worker.getWorkerId(), e);
             }
         }
     }
@@ -42,6 +43,7 @@ public class MasterResourceDistributor implements ResourceUploadedCallback {
                 JobServiceClient.uploadJobFromFile(jobPath, jobId, worker.getJobAsyncStub());
             } catch (Exception e) {
                 LOGGER.error("Error uploading job {} to worker {}: {}", jobId, worker.getWorkerId(), e.getMessage());
+                throw new IllegalStateException("Failed to distribute job " + jobId + " to worker " + worker.getWorkerId(), e);
             }
         }
     }

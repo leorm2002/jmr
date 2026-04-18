@@ -76,7 +76,7 @@ public class JobServiceImpl extends JobServiceGrpc.JobServiceImplBase {
 
                     responseObserver.onNext(response);
                     responseObserver.onCompleted();
-                } catch (IOException e) {
+                } catch (Exception e) {
                     LOGGER.error("Error saving job file", e);
                     responseObserver.onError(new JMRException("Error saving job file", e));
                 }

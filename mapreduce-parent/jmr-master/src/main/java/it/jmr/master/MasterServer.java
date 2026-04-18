@@ -2,6 +2,7 @@ package it.jmr.master;
 
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
+import it.jmr.common.JMRConstants;
 import it.jmr.common.jarservice.JarServiceImpl;
 import it.jmr.common.jarservice.JobServiceImpl;
 import it.jmr.common.utils.ExecutorManager;
@@ -66,7 +67,7 @@ public class MasterServer implements AutoCloseable {
                 .addService(new JarServiceImpl(jarStorageDirectory, ctx.jarsPaths, resourceDistributor))
                 // Handles the Jobs uploaded from the client
                 .addService(new JobServiceImpl(jobStorageDirectory, ctx.jobsPaths, resourceDistributor)) //
-                .maxInboundMessageSize(100 * 1024 * 1024 * 1024) // 100MB
+                .maxInboundMessageSize(JMRConstants.MAX_INBOUND_MESSAGE_SIZE)
                 .build();
         try {
             this.dashboardServer = new MasterDashboardHttpServer(port + 1000, ctx);
