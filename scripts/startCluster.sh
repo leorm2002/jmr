@@ -39,15 +39,15 @@ require_command() {
 open_url() {
   local url="$1"
   if command -v cmd.exe >/dev/null 2>&1; then
-    cmd.exe /c start "" "$url" >/dev/null 2>&1 || true
+    cmd.exe /c start "" "$url" >/dev/null 2>&1 &
   elif command -v powershell.exe >/dev/null 2>&1; then
-    powershell.exe -NoProfile -Command "Start-Process '$url'" >/dev/null 2>&1 || true
+    powershell.exe -NoProfile -Command "Start-Process '$url'" >/dev/null 2>&1 &
   elif command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$url" >/dev/null 2>&1 || true
+    xdg-open "$url" >/dev/null 2>&1 &
   elif command -v powershell.exe >/dev/null 2>&1; then
-    powershell.exe -NoProfile -Command "Start-Process '$url'" >/dev/null 2>&1 || true
+    powershell.exe -NoProfile -Command "Start-Process '$url'" >/dev/null 2>&1 &
   elif command -v open >/dev/null 2>&1; then
-    open "$url" >/dev/null 2>&1 || true
+    open "$url" >/dev/null 2>&1 &
   fi
 }
 
@@ -113,7 +113,15 @@ cleanup_previous_cluster() {
   local existing_ids
   existing_ids="$(docker ps -aq --filter "label=${CLUSTER_LABEL}")"
   if [[ -n "${existing_ids}" ]]; then
-    docker rm -f ${existing_ids} >/dev/null
+    docker rm -f ${existing_ids} >/dev/null 2>&1 || true
+    local deadline=$((SECONDS + 30))
+    while (( SECONDS < deadline )); do
+      existing_ids="$(docker ps -aq --filter "label=${CLUSTER_LABEL}")"
+      if [[ -z "${existing_ids}" ]]; then
+        break
+      fi
+      sleep 1
+    done
   fi
 
   if docker network inspect "${NETWORK_NAME}" >/dev/null 2>&1; then

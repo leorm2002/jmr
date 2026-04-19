@@ -6,14 +6,13 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 IMAGE_NAME="jmr-wc-submitter:local"
 NETWORK_NAME="jmr-network"
-RESULT_DIR="${REPO_ROOT}/docker-output"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/scriptExecuteWc.sh <master-port> [--skip-build] [--result-file <path>]
+Usage: scripts/scriptExecuteFailingJob.sh <master-port> <failure-phase: map|reduce> [--skip-build]
 
 Example:
-  scripts/scriptExecuteWc.sh 50051
+  scripts/scriptExecuteFailingJob.sh 50051 map
 EOF
 }
 
@@ -26,7 +25,7 @@ docker_run_raw() {
 }
 
 build_submitter_artifacts() {
-  log_step "Building word count job"
+  log_step "Building failing job jar"
   (
     cd "${REPO_ROOT}/my-mapreduce-job"
     mvn -q package -DskipTests
@@ -43,37 +42,21 @@ require_command() {
   fi
 }
 
-if [[ $# -lt 1 ]]; then
+if [[ $# -lt 2 ]]; then
   usage
   exit 1
 fi
 
 MASTER_PORT="$1"
-if ! [[ "${MASTER_PORT}" =~ ^[0-9]+$ ]]; then
-  printf 'master-port must be an integer\n' >&2
-  exit 1
-fi
-
-require_command docker
-
+FAILURE_PHASE="$2"
 SKIP_BUILD="false"
-CUSTOM_RESULT_FILE=""
 
-shift 1
+shift 2
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-build)
       SKIP_BUILD="true"
       shift
-      ;;
-    --result-file)
-      if [[ $# -lt 2 ]]; then
-        printf 'Missing value for --result-file\n' >&2
-        usage
-        exit 1
-      fi
-      CUSTOM_RESULT_FILE="$2"
-      shift 2
       ;;
     *)
       printf 'Unknown argument: %s\n' "$1" >&2
@@ -82,6 +65,22 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if ! [[ "${MASTER_PORT}" =~ ^[0-9]+$ ]]; then
+  printf 'master-port must be an integer\n' >&2
+  exit 1
+fi
+
+case "${FAILURE_PHASE}" in
+  map|reduce)
+    ;;
+  *)
+    printf 'failure-phase must be map or reduce\n' >&2
+    exit 1
+    ;;
+esac
+
+require_command docker
 
 if ! docker info >/dev/null 2>&1; then
   printf 'Docker engine is not available. Start Docker Desktop or the Docker daemon first.\n' >&2
@@ -101,46 +100,22 @@ if ! docker network inspect "${NETWORK_NAME}" >/dev/null 2>&1; then
 fi
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
-SUBMITTER_CONTAINER="jmr-submitter-wc-${RUN_ID}"
-if [[ -n "${CUSTOM_RESULT_FILE}" ]]; then
-  if [[ "${CUSTOM_RESULT_FILE}" = /* ]]; then
-    RESULT_FILE="${CUSTOM_RESULT_FILE}"
-  else
-    RESULT_FILE="${REPO_ROOT}/${CUSTOM_RESULT_FILE}"
-  fi
-else
-  RESULT_FILE="${RESULT_DIR}/wordcount-result-${RUN_ID}.ser"
-fi
-RESULT_FILE_NAME="$(basename "${RESULT_FILE}")"
-RESULT_FILE_DIR="$(dirname "${RESULT_FILE}")"
+SUBMITTER_CONTAINER="jmr-submitter-failing-${FAILURE_PHASE}-${RUN_ID}"
 
-mkdir -p "${RESULT_FILE_DIR}"
-RESULT_FILE_DIR="$(cd "${RESULT_FILE_DIR}" && pwd)"
-RESULT_FILE="${RESULT_FILE_DIR}/${RESULT_FILE_NAME}"
-rm -f "${RESULT_FILE}"
-
-log_step "Submitting word count job to master on port ${MASTER_PORT} with run id ${RUN_ID}"
+log_step "Submitting failing job (${FAILURE_PHASE}) to master on port ${MASTER_PORT}"
 docker_run_raw --rm \
   --name "${SUBMITTER_CONTAINER}" \
   --network "${NETWORK_NAME}" \
-  -v "${RESULT_FILE_DIR}:/outputs" \
   "${IMAGE_NAME}" \
   -Dlog4j.configurationFile=file:/opt/jmr/config/submitter-log4j2.xml \
   -Dlog4j2.statusLoggerLevel=WARN \
   -cp /opt/jmr/my-mapreduce-job.jar \
-  com.example.MyWcJob \
+  com.example.MyFailingJob \
   /opt/jmr/data/serialized_data \
   /opt/jmr/my-mapreduce-job.jar \
   jmr-master \
   "${MASTER_PORT}" \
-  "${SUBMITTER_CONTAINER}" \
-  "/outputs/${RESULT_FILE_NAME}"
+  "${FAILURE_PHASE}" \
+  "${SUBMITTER_CONTAINER}"
 
-if [[ ! -f "${RESULT_FILE}" ]]; then
-  printf 'Word count completed but result file was not produced at %s\n' "${RESULT_FILE}" >&2
-  exit 1
-fi
-
-printf '\nWord count completed successfully.\n'
-printf 'Submitter container: %s\n' "${SUBMITTER_CONTAINER}"
-printf 'Serialized result: %s\n' "${RESULT_FILE}"
+printf '\nFailing job completed with expected FAILED status.\n'
