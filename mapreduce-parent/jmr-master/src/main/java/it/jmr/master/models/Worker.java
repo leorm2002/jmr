@@ -109,7 +109,7 @@ public class Worker {
             if (response.getSuccess()) {
                 JMRLog.info(LOGGER, "Map task {} for job {} submitted successfully to worker {}", taskId, jobId, workerId);
             } else {
-                JMRLog.error(LOGGER, "Failed to submit map task {} for job {} to worker {}", taskId, jobId, workerId);
+                JMRLog.debug(LOGGER, "Worker {} did not accept MAP task {} for job {} (likely busy)", workerId, taskId, jobId);
             }
             return response.getSuccess();
         } catch (StatusRuntimeException e) {
@@ -164,8 +164,11 @@ public class Worker {
                 // JMRLog.info(LOGGER, "Reduce task {} for job {} submitted successfully to
                 // worker {}", taskId, jobId, workerId);
             } else {
-                JMRLog.error(LOGGER, "Failed to submit reduce task {} for job {} to worker {}: {}", taskId, jobId, workerId,
-                        response.getErrorMessage());
+                if (JMRConstants.WORKER_BUSY.equals(response.getErrorMessage()) || response.getErrorMessage().isBlank()) {
+                    JMRLog.debug(LOGGER, "Worker {} did not accept REDUCE task {} for job {} (busy)", workerId, taskId, jobId);
+                } else {
+                    JMRLog.warn(LOGGER, "Worker {} rejected REDUCE task {} for job {}: {}", workerId, taskId, jobId, response.getErrorMessage());
+                }
             }
             return response.getSuccess();
         } catch (StatusRuntimeException e) {

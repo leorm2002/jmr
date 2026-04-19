@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.grpc.stub.StreamObserver;
+import it.jmr.common.JMRConstants;
 import it.jmr.common.PartitionInfo;
 import it.jmr.common.WorkerTaskStatus;
 import it.jmr.common.utils.JMRLog;
@@ -193,7 +194,8 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         // 1. Controllo Busy
         if (this.workerNode.busy) {
             JMRLog.warn(LOGGER, "Worker is busy. Rejecting REDUCE task: {}", taskId);
-            responseObserver.onNext(SubmitReduceTaskResponse.newBuilder().setSuccess(false).build());
+            responseObserver.onNext(
+                    SubmitReduceTaskResponse.newBuilder().setSuccess(false).setTaskId(taskId).setErrorMessage(JMRConstants.WORKER_BUSY).build());
             responseObserver.onCompleted();
             return;
         }
