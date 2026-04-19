@@ -45,6 +45,10 @@ jobs:
           java-version: "25"
           cache: maven
 
+      - name: Install shared MapReduce modules
+        working-directory: mapreduce-parent
+        run: mvn -B -q install -DskipTests
+
       - name: Build word count artifact
         working-directory: my-mapreduce-job
         run: mvn -B -q package -DskipTests
