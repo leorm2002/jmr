@@ -14,7 +14,12 @@ import java.io.*;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Implementazione di DataProvider che carica dati da file e li serve tramite
@@ -50,15 +55,7 @@ public class LocalGrpcDataProvider<D extends Serializable> implements DataProvid
     }
 
     public LocalGrpcDataProvider(List<Path> filePath) throws JMRException {
-        List<D> loadedData = new ArrayList<>();
-        for (Path path : filePath) {
-            try (var in = java.nio.file.Files.newInputStream(path); var ois = new ObjectInputStream(in)) {
-                loadedData.addAll(((Container<D>) ois.readObject()).data);
-            } catch (IOException | ClassNotFoundException e) {
-                throw new JMRException("Failed to load data from file: " + path, e);
-            }
-        }
-        data = loadedData;
+        data = loadDataFilesInParallel(filePath);
         init();
     }
 
@@ -131,6 +128,62 @@ public class LocalGrpcDataProvider<D extends Serializable> implements DataProvid
 
     public String getServerHost() {
         return serverHost;
+    }
+
+    private static void logLoadProgress(final Path path, final int currentFile, final int totalFiles, final int recordsInFile,
+            final int totalLoadedRecords) {
+        final int percentage = totalFiles == 0 ? 100 : (currentFile * 100 / totalFiles);
+        System.out.printf("FSDataProvider loading: %d/%d files (%d%%) - %s -> %d records, total=%d%n", currentFile, totalFiles, percentage,
+                path.getFileName(), recordsInFile, totalLoadedRecords);
+        System.out.flush();
+    }
+
+    private static <D extends Serializable> List<D> loadDataFilesInParallel(final List<Path> filePaths) throws JMRException {
+        final int totalFiles = filePaths.size();
+        final int parallelism = Math.max(1, Math.min(totalFiles, Runtime.getRuntime().availableProcessors()));
+        final ExecutorService executor = Executors.newFixedThreadPool(parallelism);
+        final AtomicInteger completedFiles = new AtomicInteger(0);
+        final AtomicInteger totalLoadedRecords = new AtomicInteger(0);
+        final List<Future<List<D>>> futures = new ArrayList<>(totalFiles);
+
+        try {
+            for (final Path path : filePaths) {
+                futures.add(executor.submit(() -> {
+                    final List<D> fileData = readFileData(path);
+                    final int currentFile = completedFiles.incrementAndGet();
+                    final int loadedRecords = totalLoadedRecords.addAndGet(fileData.size());
+                    logLoadProgress(path, currentFile, totalFiles, fileData.size(), loadedRecords);
+                    return fileData;
+                }));
+            }
+
+            final List<D> loadedData = new ArrayList<>();
+            for (final Future<List<D>> future : futures) {
+                loadedData.addAll(future.get());
+            }
+            return loadedData;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new JMRException("Interrupted while loading data files", e);
+        } catch (ExecutionException e) {
+            final Throwable cause = e.getCause();
+            if (cause instanceof JMRException jmrException) {
+                throw jmrException;
+            }
+            throw new JMRException("Failed to load serialized data files", cause);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    private static <D extends Serializable> List<D> readFileData(final Path path) throws JMRException {
+        try (final var in = java.nio.file.Files.newInputStream(path); final var ois = new ObjectInputStream(in)) {
+            @SuppressWarnings("unchecked")
+            final List<D> fileData = ((Container<D>) ois.readObject()).data;
+            return fileData;
+        } catch (IOException | ClassNotFoundException e) {
+            throw new JMRException("Failed to load data from file: " + path, e);
+        }
     }
 
     // Implementazione del servizio gRPC
