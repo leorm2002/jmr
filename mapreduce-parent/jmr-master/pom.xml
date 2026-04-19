@@ -10,10 +10,6 @@
         <version>1.0-SNAPSHOT</version>
     </parent>
 
-    <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
-    </properties>
 
     <artifactId>jmr-master</artifactId>
     <packaging>jar</packaging>
