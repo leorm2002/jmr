@@ -112,6 +112,9 @@ public class Worker {
                 JMRLog.error(LOGGER, "Failed to submit map task {} for job {} to worker {}", taskId, jobId, workerId);
             }
             return response.getSuccess();
+        } catch (StatusRuntimeException e) {
+            JMRLog.error(LOGGER, "Error submitting map task {} for job {} to worker {}: {}", taskId, jobId, workerId, e.getMessage());
+            throw e;
         } catch (Exception e) {
             JMRLog.error(LOGGER, "Error submitting map task {} for job {} to worker {}: {}", taskId, jobId, workerId, e.getMessage());
             return false;
@@ -140,6 +143,9 @@ public class Worker {
                 JMRLog.error(LOGGER, "Map task {} of job {} on worker {} has failed", taskId, jobId, workerId);
                 return Pair.of(WorkerTaskStatus.FAILED, Collections.emptyList());
             }
+        } catch (StatusRuntimeException e) {
+            JMRLog.error(LOGGER, "Error getting status for map task {} of job {} from worker {}: {}", taskId, jobId, workerId, e.getMessage());
+            throw e;
         } catch (Exception e) {
             JMRLog.error(LOGGER, "Error getting status for map task {} of job {} from worker {}: {}", taskId, jobId, workerId, e.getMessage());
             return Pair.of(WorkerTaskStatus.FAILED, Collections.emptyList());
@@ -162,6 +168,9 @@ public class Worker {
                         response.getErrorMessage());
             }
             return response.getSuccess();
+        } catch (StatusRuntimeException e) {
+            JMRLog.error(LOGGER, "Error submitting reduce task {} for job {} to worker {}: {}", taskId, jobId, workerId, e.getMessage());
+            throw e;
         } catch (Exception e) {
             JMRLog.error(LOGGER, "Error submitting reduce task {} for job {} to worker {}: {}", taskId, jobId, workerId, e.getMessage());
             return false;
@@ -198,6 +207,9 @@ public class Worker {
                 JMRLog.error(LOGGER, "Reduce task {} of job {} on worker {} has failed", taskId, jobId, workerId);
                 return Pair.of(WorkerTaskStatus.FAILED, Collections.emptyList());
             }
+        } catch (StatusRuntimeException e) {
+            JMRLog.error(LOGGER, "Error getting status for reduce task {} of job {} from worker {}: {}", taskId, jobId, workerId, e.getMessage());
+            throw e;
         } catch (Exception e) {
             JMRLog.error(LOGGER, "Error getting status for reduce task {} of job {} from worker {}: {}", taskId, jobId, workerId, e.getMessage());
             return Pair.of(WorkerTaskStatus.FAILED, Collections.emptyList());

@@ -103,6 +103,7 @@ public class MasterExecutor implements Runnable {
         public final List<CompletedReduceTasks<O>> completedReduceTasks;
         public final List<UnassignedReduceTasks> originalReduceTasks;
         public final Map<String, Integer> reduceAttempts;
+        public final Set<String> failedWorkerIds;
 
         public volatile boolean inReducePhase;
         public final AtomicBoolean mapReplayRequested;
@@ -122,6 +123,7 @@ public class MasterExecutor implements Runnable {
             this.completedReduceTasks = new CopyOnWriteArrayList<>();
             this.originalReduceTasks = new CopyOnWriteArrayList<>();
             this.reduceAttempts = new ConcurrentHashMap<>();
+            this.failedWorkerIds = ConcurrentHashMap.newKeySet();
 
             this.inReducePhase = false;
             this.mapReplayRequested = new AtomicBoolean(false);
@@ -204,6 +206,14 @@ public class MasterExecutor implements Runnable {
                 unassignedReduceQueue.remove(task);
             }
         }
+
+        public boolean markWorkerFailed(final Worker worker) {
+            return failedWorkerIds.add(worker.getWorkerId());
+        }
+
+        public boolean isWorkerFailed(final Worker worker) {
+            return failedWorkerIds.contains(worker.getWorkerId());
+        }
     }
 
     private final MasterContext ctx;
@@ -250,7 +260,7 @@ public class MasterExecutor implements Runnable {
         final Path jobSerializedPath = jobInfo.getJobPath();
         final Path jarPath = jobInfo.getJarPath();
         final JobExecutionContext<O> jobCtx = new JobExecutionContext<>();
-        final WorkerFailureListener failureListener = worker -> handleWorkerFailure(worker, jobCtx);
+        final WorkerFailureListener failureListener = worker -> markWorkerFailed(worker, workers, jobCtx);
 
         if (masterCtx != null) {
             masterCtx.addWorkerFailureListener(failureListener);
@@ -280,7 +290,7 @@ public class MasterExecutor implements Runnable {
             final Future<?> assignerFuture = ExecutorManager.getExecutor()
                     .submit(() -> submitUnassignedMapTasks(jobInfo, workers, jobCtx, stopForError, reducePartitionCount, jobConfig));
             final Future<?> monitorFuture = ExecutorManager.getExecutor()
-                    .submit(() -> monitorAssignedMapTasks(jobInfo, jobCtx, stopForError));
+                    .submit(() -> monitorAssignedMapTasks(jobInfo, workers, jobCtx, stopForError));
 
             if (executeMapping(jobInfo, stopForError, assignerFuture, monitorFuture) == PhaseOutcome.CANCELLED) {
                 return;
@@ -310,7 +320,7 @@ public class MasterExecutor implements Runnable {
                 final Future<?> reduceAssignerFuture = ExecutorManager.getExecutor()
                         .submit(() -> submitUnassignedReduceTasks(jobInfo, workers, jobCtx, stopForError, jobConfig));
                 final Future<?> reduceMonitorFuture = ExecutorManager.getExecutor()
-                        .submit(() -> monitorAssignedReduceTasks(jobInfo, jobCtx, stopForError));
+                        .submit(() -> monitorAssignedReduceTasks(jobInfo, workers, jobCtx, stopForError));
 
                 final PhaseOutcome reduceOutcome = reduce(jobInfo, stopForError, jobCtx.mapReplayRequested, reduceAssignerFuture,
                         reduceMonitorFuture);
@@ -431,7 +441,7 @@ public class MasterExecutor implements Runnable {
         final Future<?> replayMapAssignerFuture = ExecutorManager.getExecutor()
                 .submit(() -> submitUnassignedMapTasks(jobInfo, workers, jobCtx, stopForError, reducePartitionCount, jobConfig));
         final Future<?> replayMapMonitorFuture = ExecutorManager.getExecutor()
-                .submit(() -> monitorAssignedMapTasks(jobInfo, jobCtx, stopForError));
+                .submit(() -> monitorAssignedMapTasks(jobInfo, workers, jobCtx, stopForError));
 
         return executeMapping(jobInfo, stopForError, replayMapAssignerFuture, replayMapMonitorFuture);
     }
@@ -551,13 +561,24 @@ public class MasterExecutor implements Runnable {
         }
     }
 
+    private static <O extends Serializable> void markWorkerFailed(final Worker failedWorker, final List<Worker> workers,
+            final JobExecutionContext<O> ctx) {
+        if (!ctx.markWorkerFailed(failedWorker)) {
+            return;
+        }
+
+        workers.remove(failedWorker);
+        ctx.recordEvent("Worker failed " + failedWorker.getWorkerId());
+        handleWorkerFailure(failedWorker, ctx);
+    }
+
     private static boolean dependsOnWorker(final List<it.jmr.grpc.worker.IntermediateDataLocation> intermediateDataLocations,
             final String workerId) {
         return intermediateDataLocations.stream().anyMatch(location -> location.getWorkerId().equals(workerId));
     }
 
-    private static <O extends Serializable> void monitorAssignedReduceTasks(final JobInfoInternal jobInfo, final JobExecutionContext<O> jobCtx,
-            final AtomicBoolean stopForError) {
+    private static <O extends Serializable> void monitorAssignedReduceTasks(final JobInfoInternal jobInfo, final List<Worker> workers,
+            final JobExecutionContext<O> jobCtx, final AtomicBoolean stopForError) {
         final int totalTasks = jobCtx.originalReduceTasks.size();
         int lastLoggedPercentage = -1;
 
@@ -574,6 +595,10 @@ public class MasterExecutor implements Runnable {
 
             final List<AssignedReduceTasks> toRemove = new ArrayList<>();
             for (AssignedReduceTasks assigned : jobCtx.assignedReduceTasks) {
+                if (jobCtx.mapReplayRequested.get()) {
+                    toRemove.add(assigned);
+                    continue;
+                }
                 try {
                     final Pair<WorkerTaskStatus, List<Pair<String, O>>> statusResponse = assigned.worker().getReduceTaskStatus(assigned.jobId(),
                             assigned.taskId());
@@ -585,11 +610,17 @@ public class MasterExecutor implements Runnable {
                         toRemove.add(assigned);
                     } else if (status == WorkerTaskStatus.FAILED || status == WorkerTaskStatus.MISSING) {
                         toRemove.add(assigned);
-                        requeueReduceTask(jobInfo, jobCtx, assigned.toUnassigned(), stopForError, "state=" + status, true);
+                        if (!jobCtx.mapReplayRequested.get()) {
+                            requeueReduceTask(jobInfo, jobCtx, assigned.toUnassigned(), stopForError, "state=" + status, true);
+                        }
                     }
                 } catch (StatusRuntimeException e) {
                     toRemove.add(assigned);
-                    requeueReduceTask(jobInfo, jobCtx, assigned.toUnassigned(), stopForError, "gRPC error: " + e.getStatus(), false);
+                    if (isWorkerUnavailable(e)) {
+                        markWorkerFailed(assigned.worker(), workers, jobCtx);
+                    } else if (!jobCtx.mapReplayRequested.get()) {
+                        requeueReduceTask(jobInfo, jobCtx, assigned.toUnassigned(), stopForError, "gRPC error: " + e.getStatus(), false);
+                    }
                 }
             }
 
@@ -618,36 +649,48 @@ public class MasterExecutor implements Runnable {
                 continue;
             }
 
-            final Optional<AssignedReduceTasks> assigned = tryAssignReduceTask(task, workers, jobCtx.assignedReduceTasks, jobConfig);
+            final Optional<AssignedReduceTasks> assigned = tryAssignReduceTask(task, workers, jobCtx.assignedReduceTasks, jobConfig,
+                    jobCtx::isWorkerFailed, failedWorker -> markWorkerFailed(failedWorker, workers, jobCtx));
             if (assigned.isPresent()) {
                 jobCtx.assignedReduceTasks.add(assigned.get());
                 jobCtx.recordEvent("REDUCE assigned " + task.taskId() + " to " + assigned.get().worker().getWorkerId());
             } else {
-                jobCtx.enqueueReduceTask(task);
-                JmrUtils.sleep(JMRConstants.REDUCE_TASK_SCHEDULER_SLEEP_MS);
+                if (!jobCtx.mapReplayRequested.get()) {
+                    jobCtx.enqueueReduceTask(task);
+                    JmrUtils.sleep(JMRConstants.REDUCE_TASK_SCHEDULER_SLEEP_MS);
+                }
             }
         }
     }
 
     static <D extends Serializable, V extends Serializable, O extends Serializable> Optional<AssignedReduceTasks> tryAssignReduceTask(
             final UnassignedReduceTasks task, final List<Worker> workers, final List<AssignedReduceTasks> assignedReduceTasks,
-            final JobConfiguration<D, V, O> jobConfig) {
+            final JobConfiguration<D, V, O> jobConfig, final java.util.function.Predicate<Worker> failedWorkerPredicate,
+            final Consumer<Worker> failedWorkerHandler) {
         final Set<Worker> busy = assignedReduceTasks.stream().map(AssignedReduceTasks::worker).collect(Collectors.toSet());
         for (Worker worker : workers) {
-            if (busy.contains(worker)) {
+            if (busy.contains(worker) || failedWorkerPredicate.test(worker)) {
                 continue;
             }
 
-            final boolean assigned = worker.submitReduceTask(task.jobId(), task.taskId(), task.jarId(), task.partitionId(),
-                    task.intermediateDataLocations(), jobConfig);
-            if (assigned) {
-                return Optional.of(task.toAssigned(worker));
+            try {
+                final boolean assigned = worker.submitReduceTask(task.jobId(), task.taskId(), task.jarId(), task.partitionId(),
+                        task.intermediateDataLocations(), jobConfig);
+                if (assigned) {
+                    return Optional.of(task.toAssigned(worker));
+                }
+            } catch (StatusRuntimeException e) {
+                if (isWorkerUnavailable(e)) {
+                    failedWorkerHandler.accept(worker);
+                    continue;
+                }
+                throw e;
             }
         }
         return Optional.empty();
     }
 
-    private static void monitorAssignedMapTasks(final JobInfoInternal jobInfo, final JobExecutionContext<?> jobCtx,
+    private static void monitorAssignedMapTasks(final JobInfoInternal jobInfo, final List<Worker> workers, final JobExecutionContext<?> jobCtx,
             final AtomicBoolean stopForError) {
         final int totalTasks = jobCtx.originalMapTasks.size();
         int lastLoggedPercentage = -1;
@@ -679,7 +722,11 @@ public class MasterExecutor implements Runnable {
                     }
                 } catch (StatusRuntimeException e) {
                     toRemove.add(assigned);
-                    requeueMapTask(jobInfo, jobCtx, assigned.toUnassigned(), stopForError, "gRPC error: " + e.getStatus(), false);
+                    if (isWorkerUnavailable(e)) {
+                        markWorkerFailed(assigned.worker(), workers, jobCtx);
+                    } else {
+                        requeueMapTask(jobInfo, jobCtx, assigned.toUnassigned(), stopForError, "gRPC error: " + e.getStatus(), false);
+                    }
                 }
             }
 
@@ -708,7 +755,8 @@ public class MasterExecutor implements Runnable {
                 continue;
             }
 
-            final Optional<AssignedMapTasks> assigned = tryAssignMapTask(task, workers, jobCtx.assignedMapTasks, reducePartitionCount, jobConfig);
+            final Optional<AssignedMapTasks> assigned = tryAssignMapTask(task, workers, jobCtx.assignedMapTasks, reducePartitionCount, jobConfig,
+                    jobCtx::isWorkerFailed, failedWorker -> markWorkerFailed(failedWorker, workers, jobCtx));
             if (assigned.isPresent()) {
                 jobCtx.assignedMapTasks.add(assigned.get());
                 jobCtx.recordEvent("MAP assigned " + task.taskId() + " to " + assigned.get().worker().getWorkerId());
@@ -794,14 +842,15 @@ public class MasterExecutor implements Runnable {
 
     static <D extends Serializable, V extends Serializable, O extends Serializable> Optional<AssignedMapTasks> tryAssignMapTask(
             final UnassignedMapTasks task, final List<Worker> workers, final List<AssignedMapTasks> assignedTasks,
-            final int reducePartitionCount, final JobConfiguration<D, V, O> jobConfig) {
+            final int reducePartitionCount, final JobConfiguration<D, V, O> jobConfig,
+            final java.util.function.Predicate<Worker> failedWorkerPredicate, final Consumer<Worker> failedWorkerHandler) {
         final Set<Worker> busy = assignedTasks.stream().map(AssignedMapTasks::worker).collect(Collectors.toSet());
         for (Worker worker : workers) {
-            if (busy.contains(worker)) {
+            if (busy.contains(worker) || failedWorkerPredicate.test(worker)) {
                 continue;
             }
 
-            final Optional<AssignedMapTasks> result = tryAssignMapTask(task, worker, reducePartitionCount, jobConfig);
+            final Optional<AssignedMapTasks> result = tryAssignMapTask(task, worker, reducePartitionCount, jobConfig, failedWorkerHandler);
             if (result.isPresent()) {
                 return result;
             }
@@ -810,13 +859,26 @@ public class MasterExecutor implements Runnable {
     }
 
     static <D extends Serializable, V extends Serializable, O extends Serializable> Optional<AssignedMapTasks> tryAssignMapTask(
-            final UnassignedMapTasks task, final Worker worker, final int reducePartitionCount, final JobConfiguration<D, V, O> jobConfig) {
-        final boolean assigned = worker.submitMapTask(task.jobId(), task.taskId(), task.chunks().getFirst().intValue(),
-                (int) (task.chunks().getSecond() - task.chunks().getFirst()), task.jarId(), reducePartitionCount, jobConfig);
-        if (assigned) {
-            return Optional.of(task.toAssigned(worker));
+            final UnassignedMapTasks task, final Worker worker, final int reducePartitionCount, final JobConfiguration<D, V, O> jobConfig,
+            final Consumer<Worker> failedWorkerHandler) {
+        try {
+            final boolean assigned = worker.submitMapTask(task.jobId(), task.taskId(), task.chunks().getFirst().intValue(),
+                    (int) (task.chunks().getSecond() - task.chunks().getFirst()), task.jarId(), reducePartitionCount, jobConfig);
+            if (assigned) {
+                return Optional.of(task.toAssigned(worker));
+            }
+        } catch (StatusRuntimeException e) {
+            if (isWorkerUnavailable(e)) {
+                failedWorkerHandler.accept(worker);
+                return Optional.empty();
+            }
+            throw e;
         }
         return Optional.empty();
+    }
+
+    private static boolean isWorkerUnavailable(final StatusRuntimeException exception) {
+        return exception.getStatus().getCode() == io.grpc.Status.Code.UNAVAILABLE;
     }
 
     private static PhaseOutcome cancelExecution(final JobInfoInternal jobInfo) {
