@@ -3,6 +3,7 @@ package it.jmr.worker;
 import java.io.IOException;
 import java.io.Serializable;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -185,13 +186,15 @@ public class WorkerServer implements IntermediateDataFetcher {
         WorkerServiceGrpc.WorkerServiceBlockingStub stub = getOrCreateBlockingStub(host, port);
         FetchIntermediateDataRequest request = FetchIntermediateDataRequest.newBuilder().setTaskId(taskId).setPartitionId(partitionId).build();
 
-        try (java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream()) {
+        try {
+            final List<VALUE> combinedData = new ArrayList<>();
             Iterator<IntermediateDataChunk> chunks = stub.fetchIntermediateData(request);
             while (chunks.hasNext()) {
                 IntermediateDataChunk chunk = chunks.next();
-                baos.write(chunk.getData().toByteArray());
+                final List<VALUE> batch = JmrUtils.deserialize(JmrUtils.gunzip(chunk.getData().toByteArray()));
+                combinedData.addAll(batch);
             }
-            return JmrUtils.deserialize(JmrUtils.gunzip(baos.toByteArray()));
+            return combinedData;
         } catch (IOException | ClassNotFoundException e) {
             throw new JMRException("Error fetching remote intermediate data", e);
         }

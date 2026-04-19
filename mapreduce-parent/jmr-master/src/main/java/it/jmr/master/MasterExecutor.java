@@ -166,6 +166,9 @@ public class MasterExecutor implements Runnable {
         }
 
         public void enqueueMapTask(final UnassignedMapTasks task) {
+            if (containsAssignedMapTask(task.taskId()) || containsCompletedMapTask(task.taskId())) {
+                return;
+            }
             if (queuedMapTaskIds.add(task.taskId())) {
                 unassignedMapQueue.offer(task);
             }
@@ -184,6 +187,9 @@ public class MasterExecutor implements Runnable {
         }
 
         public void enqueueReduceTask(final UnassignedReduceTasks task) {
+            if (containsAssignedReduceTask(task.taskId()) || containsCompletedReduceTask(task.taskId())) {
+                return;
+            }
             if (queuedReduceTaskIds.add(task.taskId())) {
                 unassignedReduceQueue.offer(task);
             }
@@ -213,6 +219,22 @@ public class MasterExecutor implements Runnable {
 
         public boolean isWorkerFailed(final Worker worker) {
             return failedWorkerIds.contains(worker.getWorkerId());
+        }
+
+        public boolean containsAssignedMapTask(final String taskId) {
+            return assignedMapTasks.stream().anyMatch(task -> task.taskId().equals(taskId));
+        }
+
+        public boolean containsCompletedMapTask(final String taskId) {
+            return completedMapTasks.stream().anyMatch(task -> task.taskId().equals(taskId));
+        }
+
+        public boolean containsAssignedReduceTask(final String taskId) {
+            return assignedReduceTasks.stream().anyMatch(task -> task.taskId().equals(taskId));
+        }
+
+        public boolean containsCompletedReduceTask(final String taskId) {
+            return completedReduceTasks.stream().anyMatch(task -> task.taskId().equals(taskId));
         }
     }
 
@@ -648,6 +670,9 @@ public class MasterExecutor implements Runnable {
                 JmrUtils.sleep(JMRConstants.REDUCE_TASK_SCHEDULER_SLEEP_MS);
                 continue;
             }
+            if (jobCtx.containsAssignedReduceTask(task.taskId()) || jobCtx.containsCompletedReduceTask(task.taskId())) {
+                continue;
+            }
 
             final Optional<AssignedReduceTasks> assigned = tryAssignReduceTask(task, workers, jobCtx.assignedReduceTasks, jobConfig,
                     jobCtx::isWorkerFailed, failedWorker -> markWorkerFailed(failedWorker, workers, jobCtx));
@@ -754,6 +779,9 @@ public class MasterExecutor implements Runnable {
                 JmrUtils.sleep(JMRConstants.MAP_TASK_SCHEDULER_SLEEP_MS);
                 continue;
             }
+            if (jobCtx.containsAssignedMapTask(task.taskId()) || jobCtx.containsCompletedMapTask(task.taskId())) {
+                continue;
+            }
 
             final Optional<AssignedMapTasks> assigned = tryAssignMapTask(task, workers, jobCtx.assignedMapTasks, reducePartitionCount, jobConfig,
                     jobCtx::isWorkerFailed, failedWorker -> markWorkerFailed(failedWorker, workers, jobCtx));
@@ -802,6 +830,8 @@ public class MasterExecutor implements Runnable {
     }
 
     private static void addCompletedMapTask(final JobExecutionContext<?> jobCtx, final CompletedMapTasks completedTask) {
+        jobCtx.queuedMapTaskIds.remove(completedTask.taskId());
+        jobCtx.unassignedMapQueue.removeIf(existing -> existing.taskId().equals(completedTask.taskId()));
         jobCtx.completedMapTasks.removeIf(existing -> existing.taskId().equals(completedTask.taskId()));
         jobCtx.completedMapTasks.add(completedTask);
         jobCtx.recordEvent("MAP completed " + completedTask.taskId() + " on " + completedTask.worker().getWorkerId());
@@ -809,6 +839,8 @@ public class MasterExecutor implements Runnable {
 
     private static <O extends Serializable> void addCompletedReduceTask(final JobExecutionContext<O> jobCtx,
             final CompletedReduceTasks<O> completedTask) {
+        jobCtx.queuedReduceTaskIds.remove(completedTask.taskId());
+        jobCtx.unassignedReduceQueue.removeIf(existing -> existing.taskId().equals(completedTask.taskId()));
         jobCtx.completedReduceTasks.removeIf(existing -> existing.taskId().equals(completedTask.taskId()));
         jobCtx.completedReduceTasks.add(completedTask);
         jobCtx.recordEvent("REDUCE completed " + completedTask.taskId() + " on " + completedTask.worker().getWorkerId());

@@ -17,6 +17,7 @@ public class JMRConstants {
     public static final int MASTER_POLL_INTERVAL_MS = 2 * KMS; // 2 seconds
     public static final int MAX_TASK_RETRIES = 3;
     public static final int REDUCE_BUCKETS_PER_WORKER = 4;
+    public static final int INTERMEDIATE_DATA_BATCH_SIZE = 512;
     public static final String WORKER_BUSY = "WORKER_BUSY";
 
 }

@@ -1,8 +1,6 @@
 package it.jmr.worker;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.LinkedList;
@@ -310,22 +308,21 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         JMRLog.debug(LOGGER, "Fetching intermediate data for task {} partition {}", request.getTaskId(), request.getPartitionId());
         try {
             final List<Serializable> data = workerNode.intermediateStorage.getPartitionData(request.getTaskId(), request.getPartitionId());
+            final int batchSize = Math.max(1, JMRConstants.INTERMEDIATE_DATA_BATCH_SIZE);
+            final int totalBatches = Math.max(1, (data.size() + batchSize - 1) / batchSize);
 
-            final byte[] serializedData = JmrUtils.gzip(JmrUtils.serializeObject(new ArrayList<>(data)));
+            for (int batchStart = 0; batchStart < data.size(); batchStart += batchSize) {
+                final int batchEnd = Math.min(batchStart + batchSize, data.size());
+                final List<Serializable> batch = new ArrayList<>(data.subList(batchStart, batchEnd));
+                final byte[] serializedBatch = JmrUtils.gzip(JmrUtils.serializeObject((Serializable) batch));
+                final boolean isLast = batchEnd >= data.size();
 
-            // Send the data in chunks
-            int chunkSize = 64 * 1024; // 64KB
-            int offset = 0;
-
-            while (offset < serializedData.length) {
-                final int length = Math.min(chunkSize, serializedData.length - offset);
-                final boolean isLast = (offset + length >= serializedData.length);
-
-                final IntermediateDataChunk chunk = IntermediateDataChunk.newBuilder()
-                        .setData(com.google.protobuf.ByteString.copyFrom(serializedData, offset, length)).setIsLast(isLast).build();
+                final IntermediateDataChunk chunk = IntermediateDataChunk.newBuilder().setData(com.google.protobuf.ByteString.copyFrom(serializedBatch))
+                        .setIsLast(isLast).build();
 
                 responseObserver.onNext(chunk);
-                offset += length;
+                JMRLog.debug(LOGGER, "Fetched intermediate batch {}/{} for task {} partition {}", (batchStart / batchSize) + 1, totalBatches,
+                        request.getTaskId(), request.getPartitionId());
             }
 
             responseObserver.onCompleted();
