@@ -1,0 +1,8 @@
+{
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "java.debug.settings.onBuildFailureProceed": true,
+    "editor.formatOnSave": true,
+    "java.compile.nullAnalysis.mode": "automatic",
+    "java.format.settings.url": ".vscode/formatter.xml",
+    "java.autobuild.enabled": false
+}

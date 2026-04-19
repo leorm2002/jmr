@@ -1,0 +1,107 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "MyWcJobJ",
+            "request": "launch",
+            "classPaths": [
+                "${workspaceFolder}\\my-mapreduce-job\\target\\my-mapreduce-job-1.0-SNAPSHOT-jar-with-dependencies.jar",
+            ],
+            "mainClass": "com.example.MyWcJob",
+            "args": [
+                "${workspaceFolder}\\data\\serialized_data",
+                "${workspaceFolder}\\my-mapreduce-job\\target\\my-mapreduce-job-1.0-SNAPSHOT-jar-with-dependencies.jar",
+                "localhost",
+                "8080"
+            ]
+        },
+        {
+            "type": "java",
+            "name": "WorkerLauncher",
+            "request": "launch",
+            "mainClass": "it.jmr.worker.WorkerLauncher",
+            "projectName": "jmr-worker",
+            "vmArgs": "-Djava.net.preferIPv4Stack=true",
+            "args": "-w w1 -p 8081 -sd ${workspaceFolder}"
+        },
+        {
+            "type": "java",
+            "name": "MasterLauncher",
+            "request": "launch",
+            "mainClass": "it.jmr.master.MasterLauncher",
+            "projectName": "jmr-master",
+            "vmArgs": "-Djava.net.preferIPv4Stack=true",
+            "args": "-p 8080 -sd ${workspaceFolder}"
+        },
+        {
+            "type": "java",
+            "name": "Worker2Launcher",
+            "request": "launch",
+            "mainClass": "it.jmr.worker.WorkerLauncher",
+            "projectName": "jmr-worker",
+            "vmArgs": "-Djava.net.preferIPv4Stack=true",
+            "args": "-w w2 -p 8082 -sd ${workspaceFolder}"
+        },
+        {
+            "type": "java",
+            "name": "Worker3Launcher",
+            "request": "launch",
+            "mainClass": "it.jmr.worker.WorkerLauncher",
+            "projectName": "jmr-worker",
+            "vmArgs": "-Djava.net.preferIPv4Stack=true",
+            "args": "-w w3 -p 8083 -sd ${workspaceFolder}"
+        },
+        {
+            "type": "java",
+            "name": "Worker4Launcher",
+            "request": "launch",
+            "mainClass": "it.jmr.worker.WorkerLauncher",
+            "projectName": "jmr-worker",
+            "vmArgs": "-Djava.net.preferIPv4Stack=true",
+            "args": "-w w4 -p 8084 -sd ${workspaceFolder}"
+        },
+        {
+            "type": "java",
+            "name": "Worker5Launcher",
+            "request": "launch",
+            "mainClass": "it.jmr.worker.WorkerLauncher",
+            "projectName": "jmr-worker",
+            "vmArgs": "-Djava.net.preferIPv4Stack=true",
+            "args": "-w w5 -p 8085 -sd ${workspaceFolder}"
+        },
+        {
+            "type": "java",
+            "name": "Worker6Launcher",
+            "request": "launch",
+            "mainClass": "it.jmr.worker.WorkerLauncher",
+            "projectName": "jmr-worker",
+            "vmArgs": "-Djava.net.preferIPv4Stack=true",
+            "args": "-w w6 -p 8086 -sd ${workspaceFolder}"
+        },
+        {
+            "type": "java",
+            "name": "PreparaDati",
+            "request": "launch",
+            "mainClass": "com.example.PreparaDati",
+            "projectName": "my-mapreduce-job",
+            "args": "${workspaceFolder}\\data\\raw_data ${workspaceFolder}\\data\\serialized_data"
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Launch Full Cluster",
+            "configurations": [
+                "WorkerLauncher",
+                "Worker2Launcher",
+                "Worker3Launcher",
+                "Worker4Launcher",
+                "Worker5Launcher",
+                "Worker6Launcher"
+            ]
+        }
+    ]
+}

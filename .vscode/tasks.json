@@ -1,0 +1,35 @@
+{
+	"version": "2.0.0",
+	"tasks": [		
+		{
+			"label": "master",
+			"type": "shell",
+			"command": "java -jar ${workspaceFolder}/mapreduce-parent/jmr-master/target/jmr-master-1.0-SNAPSHOT-jar-with-dependencies.jar -p 8080 -jsd storage/master",
+			"problemMatcher": []
+		},
+		{
+			"label": "worker1",
+			"type": "shell",
+			"command": "java -jar ${workspaceFolder}/mapreduce-parent/jmr-worker/target/jmr-worker-1.0-SNAPSHOT-jar-with-dependencies.jar w1 8081",
+			"problemMatcher": []
+		},
+		{
+			"label": "submit-job",
+			"type": "shell",
+			"command": "java -jar mapreduce-parent/jmr-common/target/jmr-common-1.0-SNAPSHOT.jar submit localhost 8080 my-mapreduce-job/target/my-mapreduce-job-1.0-SNAPSHOT-jar-with-dependencies.jar com.example.MyJob",
+			"problemMatcher": []
+		},
+		{
+            "label": "wait-1s",
+            "type": "shell",
+            "command": "timeout /t 1 /nobreak",
+            "problemMatcher": []
+        },
+        {
+            "label": "wait-2s",
+            "type": "shell",
+            "command": "timeout /t 2 /nobreak",
+            "problemMatcher": []
+        }
+	]
+}
