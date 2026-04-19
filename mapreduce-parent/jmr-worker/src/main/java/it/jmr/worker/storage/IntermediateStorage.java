@@ -10,5 +10,7 @@ public interface IntermediateStorage {
 
     java.util.List<Serializable> getPartitionData(String taskId, String partitionId);
 
+    void deleteTaskData(String taskId);
+
     void clear();
 }

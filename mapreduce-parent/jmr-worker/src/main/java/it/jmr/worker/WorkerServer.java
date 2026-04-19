@@ -31,7 +31,8 @@ import it.jmr.grpc.worker.FetchIntermediateDataRequest;
 import it.jmr.grpc.worker.IntermediateDataChunk;
 import it.jmr.grpc.worker.WorkerServiceGrpc;
 import it.jmr.worker.models.WorkerContext;
-import it.jmr.worker.storage.InMemoryIntermediateStorage;
+import it.jmr.worker.storage.FsIntermediateStorage;
+import it.jmr.worker.storage.FsReduceResultStorage;
 
 import it.jmr.common.IntermediateDataFetcher;
 
@@ -63,10 +64,13 @@ public class WorkerServer implements IntermediateDataFetcher {
         jarStorageDir.toFile().mkdirs();
         jobStorageDir.toFile().mkdirs();
 
-        this.ctx = new WorkerContext(new InMemoryIntermediateStorage(), workerId, jarStorageDir, jobStorageDir, port);
+        final Path intermediateStorageDir = jarStorageDir.getParent().resolve("intermediate");
+        final Path reduceResultStorageDir = jarStorageDir.getParent().resolve("reduce-results");
+        this.ctx = new WorkerContext(new FsIntermediateStorage(intermediateStorageDir), new FsReduceResultStorage(reduceResultStorageDir), workerId,
+                jarStorageDir, jobStorageDir, port);
         this.healthStatusManager = new HealthStatusManager();
 
-        // Add log appender for dashboard
+        // Add log appender for dashboard   
         org.apache.logging.log4j.core.LoggerContext lc = (org.apache.logging.log4j.core.LoggerContext) org.apache.logging.log4j.LogManager.getContext(false);
         org.apache.logging.log4j.core.config.Configuration config = lc.getConfiguration();
         org.apache.logging.log4j.core.layout.PatternLayout layout = org.apache.logging.log4j.core.layout.PatternLayout.newBuilder().withPattern("%d{HH:mm:ss} %-5level %logger{15} - %msg").build();

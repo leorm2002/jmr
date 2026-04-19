@@ -56,7 +56,18 @@ class WorkerDashboardHttpServer implements AutoCloseable {
         json.append("{");
         json.append("\"workerId\":\"").append(escape(ctx.workerId)).append("\",");
         json.append("\"grpcPort\":").append(ctx.port).append(",");
-        json.append("\"busy\":").append(ctx.busy).append(",");
+        json.append("\"busy\":").append(ctx.isBusy()).append(",");
+        final Runtime runtime = Runtime.getRuntime();
+        final long heapUsedMb = bytesToMb(runtime.totalMemory() - runtime.freeMemory());
+        final long heapCommittedMb = bytesToMb(runtime.totalMemory());
+        final long heapMaxMb = bytesToMb(runtime.maxMemory());
+        final long heapAvailableMb = Math.max(0L, heapMaxMb - heapUsedMb);
+        final int heapUsagePercent = heapMaxMb > 0 ? (int) Math.min(100L, (heapUsedMb * 100L) / heapMaxMb) : 0;
+        json.append("\"heapUsedMb\":").append(heapUsedMb).append(",");
+        json.append("\"heapCommittedMb\":").append(heapCommittedMb).append(",");
+        json.append("\"heapMaxMb\":").append(heapMaxMb).append(",");
+        json.append("\"heapAvailableMb\":").append(heapAvailableMb).append(",");
+        json.append("\"heapUsagePercent\":").append(heapUsagePercent).append(",");
         json.append("\"mapCompleted\":").append(ctx.mapTaskResults.size()).append(",");
         json.append("\"reduceCompleted\":").append(ctx.reduceTaskResults.size()).append(",");
 
@@ -103,7 +114,7 @@ class WorkerDashboardHttpServer implements AutoCloseable {
             json.append("{");
             json.append("\"taskId\":\"").append(escape(taskResult.getTaskId())).append("\",");
             json.append("\"executionTime\":").append(taskResult.getExecutionTime()).append(",");
-            json.append("\"records\":").append(taskResult.getReducedData().size());
+            json.append("\"records\":").append(taskResult.getRecordCount());
             json.append("}");
         }
         json.append("],");
@@ -153,6 +164,10 @@ class WorkerDashboardHttpServer implements AutoCloseable {
         return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\r", "\\r").replace("\n", "\\n");
     }
 
+    private static long bytesToMb(final long bytes) {
+        return bytes / (1024L * 1024L);
+    }
+
     private static final String INDEX_HTML = """
             <!doctype html>
             <html lang="en">
@@ -190,6 +205,10 @@ class WorkerDashboardHttpServer implements AutoCloseable {
                   <div class="panel"><div class="muted">Busy</div><div class="metric" id="busy">-</div></div>
                   <div class="panel"><div class="muted">Map done</div><div class="metric" id="mapCompleted">0</div></div>
                   <div class="panel"><div class="muted">Reduce done</div><div class="metric" id="reduceCompleted">0</div></div>
+                  <div class="panel"><div class="muted">Heap used</div><div class="metric" id="heapUsedMb">0 MB</div></div>
+                  <div class="panel"><div class="muted">Heap free</div><div class="metric" id="heapAvailableMb">0 MB</div></div>
+                  <div class="panel"><div class="muted">Heap max</div><div class="metric" id="heapMaxMb">0 MB</div></div>
+                  <div class="panel"><div class="muted">Heap use</div><div class="metric" id="heapUsagePercent">0%</div></div>
                 </section>
                 <section class="row">
                   <div class="panel">
@@ -226,6 +245,10 @@ class WorkerDashboardHttpServer implements AutoCloseable {
                   document.getElementById('busy').textContent = state.busy ? 'YES' : 'NO';
                   document.getElementById('mapCompleted').textContent = state.mapCompleted;
                   document.getElementById('reduceCompleted').textContent = state.reduceCompleted;
+                  document.getElementById('heapUsedMb').textContent = `${state.heapUsedMb} MB`;
+                  document.getElementById('heapAvailableMb').textContent = `${state.heapAvailableMb} MB`;
+                  document.getElementById('heapMaxMb').textContent = `${state.heapMaxMb} MB`;
+                  document.getElementById('heapUsagePercent').textContent = `${state.heapUsagePercent}%`;
                   document.getElementById('runningTasks').innerHTML = state.runningTasks.length
                     ? state.runningTasks.map(task => `<div class="event"><strong>${task.taskId}</strong><br><span class="muted">${task.jobId}</span></div>`).join('')
                     : '<span class="muted">No running task.</span>';

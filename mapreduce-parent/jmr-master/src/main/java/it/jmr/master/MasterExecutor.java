@@ -281,6 +281,7 @@ public class MasterExecutor implements Runnable {
         final String jobId = jobInfo.getJobId();
         final Path jobSerializedPath = jobInfo.getJobPath();
         final Path jarPath = jobInfo.getJarPath();
+        final List<Worker> workerSnapshot = new ArrayList<>(workers);
         final JobExecutionContext<O> jobCtx = new JobExecutionContext<>();
         final WorkerFailureListener failureListener = worker -> markWorkerFailed(worker, workers, jobCtx);
 
@@ -367,6 +368,7 @@ public class MasterExecutor implements Runnable {
             jobCtx.recordEvent("Job " + jobInfo.getJobId() + " completed");
             LOGGER.info("<<< Job completed: {} (time: {}ms)\n", jobInfo.getJobId(), jobInfo.getExecutionTime());
         } finally {
+            cleanupWorkerArtifacts(jobInfo, workerSnapshot, jobCtx);
             if (masterCtx != null) {
                 masterCtx.removeWorkerFailureListener(failureListener);
                 masterCtx.clearActiveExecution();
@@ -933,5 +935,19 @@ public class MasterExecutor implements Runnable {
         jobInfo.clearSerializedResult();
         jobInfo.setStatus(JobStatus.FAILED);
         jobInfo.setErrorMessage(errorMessage);
+    }
+
+    private static void cleanupWorkerArtifacts(final JobInfoInternal jobInfo, final List<Worker> workers,
+            final JobExecutionContext<?> jobCtx) {
+        if (workers == null || workers.isEmpty()) {
+            return;
+        }
+
+        for (final Worker worker : workers) {
+            final boolean cleaned = worker.cleanupJobData(jobInfo.getJobId());
+            if (cleaned) {
+                jobCtx.recordEvent("Cleanup completed on " + worker.getWorkerId());
+            }
+        }
     }
 }

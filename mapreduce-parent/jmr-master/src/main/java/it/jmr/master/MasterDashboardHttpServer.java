@@ -88,7 +88,7 @@ class MasterDashboardHttpServer implements AutoCloseable {
             json.append("\"workerId\":\"").append(escape(worker.getWorkerId())).append("\",");
             json.append("\"grpcPort\":").append(worker.getPort()).append(",");
             json.append("\"dashboardPort\":").append(worker.getPort() + 1000).append(",");
-            json.append("\"alive\":").append(worker.isAlive());
+            json.append("\"alive\":true");
             json.append("}");
         }
         json.append("],");

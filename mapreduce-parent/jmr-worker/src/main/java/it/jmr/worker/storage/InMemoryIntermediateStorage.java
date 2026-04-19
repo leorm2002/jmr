@@ -18,6 +18,11 @@ public class InMemoryIntermediateStorage implements IntermediateStorage {
     }
 
     @Override
+    public void deleteTaskData(String taskId) {
+        storage.keySet().removeIf(key -> key.startsWith(taskId + "_"));
+    }
+
+    @Override
     public void clear() {
         storage.clear();
     }

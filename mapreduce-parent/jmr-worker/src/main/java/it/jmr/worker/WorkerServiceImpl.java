@@ -2,6 +2,8 @@ package it.jmr.worker;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
@@ -23,6 +25,8 @@ import it.jmr.grpc.worker.SubmitMapTaskResponse;
 import it.jmr.grpc.worker.SubmitReduceTaskRequest;
 import it.jmr.grpc.worker.SubmitReduceTaskResponse;
 import it.jmr.grpc.worker.TaskState;
+import it.jmr.grpc.worker.CleanupJobDataRequest;
+import it.jmr.grpc.worker.CleanupJobDataResponse;
 import it.jmr.grpc.worker.FetchIntermediateDataRequest;
 import it.jmr.grpc.worker.GetMapTaskStatusRequest;
 import it.jmr.grpc.worker.GetMapTaskStatusResponse;
@@ -120,9 +124,10 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
 
         JMRLog.info(LOGGER, "\n>>> Received MAP task: {} for job: {}", taskId, jobId);
         workerNode.recordEvent("MAP received " + taskId + " for job " + jobId);
+        workerNode.rememberJobJar(jobId, request.getJarId());
 
         // 1. Controllo Busy e Rifiuto Immediato
-        if (this.workerNode.busy) {
+        if (!this.workerNode.tryAcquireTaskSlot()) {
             JMRLog.warn(LOGGER, "Worker is busy. Rejecting MAP task: {}", taskId);
             responseObserver.onNext(SubmitMapTaskResponse.newBuilder().setSuccess(false).build());
             responseObserver.onCompleted();
@@ -130,7 +135,6 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         }
 
         // 2. Accettazione Task
-        this.workerNode.busy = true;
         // Impostiamo subito lo stato a RUNNING così i primi heartbeat rileveranno il
         // lavoro
         workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.RUNNING);
@@ -175,8 +179,14 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
                 workerNode.recordEvent("MAP failed " + taskId + ": " + e.getClass().getSimpleName());
             } finally {
                 // Rilascia il worker per nuovi task
-                this.workerNode.busy = false;
+                this.workerNode.releaseTaskSlot();
             }
+        }, workerNode.taskExecutor).exceptionally(throwable -> {
+            JMRLog.error(LOGGER, "Async MAP execution pipeline failed for {}", taskId, throwable);
+            workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.FAILED);
+            workerNode.recordEvent("MAP failed " + taskId + ": " + throwable.getClass().getSimpleName());
+            workerNode.releaseTaskSlot();
+            return null;
         });
     }
 
@@ -188,9 +198,10 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         JMRLog.info(LOGGER, "\n>>> Received REDUCE task: {} for job: {}", taskId, jobId);
         JMRLog.info(LOGGER, "    Partition: {}", request.getPartitionId());
         workerNode.recordEvent("REDUCE received " + taskId + " for partition " + request.getPartitionId());
+        workerNode.rememberJobJar(jobId, request.getJarId());
 
         // 1. Controllo Busy
-        if (this.workerNode.busy) {
+        if (!this.workerNode.tryAcquireTaskSlot()) {
             JMRLog.warn(LOGGER, "Worker is busy. Rejecting REDUCE task: {}", taskId);
             responseObserver.onNext(
                     SubmitReduceTaskResponse.newBuilder().setSuccess(false).setTaskId(taskId).setErrorMessage(JMRConstants.WORKER_BUSY).build());
@@ -199,7 +210,6 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
         }
 
         // 2. Accettazione Task
-        this.workerNode.busy = true;
         workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.RUNNING);
 
         // 3. Risposta gRPC immediata (ACK)
@@ -220,7 +230,8 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
                 final long executionTime = System.currentTimeMillis() - startTime;
 
                 // Aggiornamento risultati e stato
-                final ReduceTaskResult taskResult = new ReduceTaskResult(jobId, taskId, reducedData, executionTime);
+                workerNode.reduceResultStorage.saveReducedData(jobId, taskId, reducedData);
+                final ReduceTaskResult taskResult = new ReduceTaskResult(jobId, taskId, reducedData.size(), executionTime);
                 workerNode.reduceTaskResults.put(Pair.of(jobId, taskId), taskResult);
                 workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.COMPLETED);
                 workerNode.recordEvent("REDUCE completed " + taskId + " in " + executionTime + "ms");
@@ -234,8 +245,14 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
                 workerNode.recordEvent("REDUCE failed " + taskId + ": " + e.getClass().getSimpleName());
             } finally {
                 // Rilascia il worker
-                this.workerNode.busy = false;
+                this.workerNode.releaseTaskSlot();
             }
+        }, workerNode.taskExecutor).exceptionally(throwable -> {
+            JMRLog.error(LOGGER, "Async REDUCE execution pipeline failed for {}", taskId, throwable);
+            workerNode.statusMap.put(Pair.of(jobId, taskId), WorkerTaskStatus.FAILED);
+            workerNode.recordEvent("REDUCE failed " + taskId + ": " + throwable.getClass().getSimpleName());
+            workerNode.releaseTaskSlot();
+            return null;
         });
     }
 
@@ -279,9 +296,17 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
             return;
         }
 
+        final List<Pair<String, Serializable>> storedReducedData = workerNode.reduceResultStorage.getReducedData(jobId, taskId);
+        if (storedReducedData == null) {
+            JMRLog.error(LOGGER, "Status is COMPLETED but persisted result is missing for reduce task {}", taskId);
+            responseObserver.onNext(it.jmr.grpc.worker.GetReduceTaskStatusResponse.newBuilder().setState(TaskState.TASK_FAILED).build());
+            responseObserver.onCompleted();
+            return;
+        }
+
         final List<it.jmr.grpc.worker.ReducedData> reducedDataList = new ArrayList<>();
         try {
-            for (final Pair<String, Serializable> entry : taskResult.getReducedData()) {
+            for (final Pair<String, Serializable> entry : storedReducedData) {
                 final ReducedData pair = it.jmr.grpc.worker.ReducedData.newBuilder().setKey(entry.getFirst())
                         .setValue(com.google.protobuf.ByteString.copyFrom(JmrUtils.serializeObject(entry.getSecond()))).build();
                 reducedDataList.add(pair);
@@ -337,13 +362,64 @@ class WorkerServiceImpl extends WorkerServiceGrpc.WorkerServiceImplBase {
     @Override
     public void getWorkerStatus(GetWorkerStatusRequest request, StreamObserver<GetWorkerStatusResponse> responseObserver) {
         JMRLog.debug(LOGGER, "Received getWorkerStatus request for worker {}", request.getWorkerId());
-        final WorkerStatus status = WorkerStatus.newBuilder().setActiveTasks(this.workerNode.busy ? 1 : 0).setCpuUsage(99.9).setMemoryUsage(99.9)
+        final Runtime runtime = Runtime.getRuntime();
+        final long usedBytes = runtime.totalMemory() - runtime.freeMemory();
+        final long maxBytes = runtime.maxMemory();
+        final double heapUsagePct = maxBytes > 0 ? (usedBytes * 100.0d / maxBytes) : 0.0d;
+        final WorkerStatus status = WorkerStatus.newBuilder().setActiveTasks(this.workerNode.isBusy() ? 1 : 0).setCpuUsage(99.9)
+                .setMemoryUsage(heapUsagePct)
                 .build();
 
         final GetWorkerStatusResponse response = GetWorkerStatusResponse.newBuilder().setWorkerId(this.workerNode.workerId)
-                .setState(this.workerNode.busy ? WorkerState.BUSY : WorkerState.IDLE).setCurrentStatus(status).build();
+                .setState(this.workerNode.isBusy() ? WorkerState.BUSY : WorkerState.IDLE).setCurrentStatus(status).build();
 
         responseObserver.onNext(response);
         responseObserver.onCompleted();
+    }
+
+    @Override
+    public void cleanupJobData(final CleanupJobDataRequest request, final StreamObserver<CleanupJobDataResponse> responseObserver) {
+        final String jobId = request.getJobId();
+        JMRLog.info(LOGGER, "Cleaning local worker data for job {}", jobId);
+
+        try {
+            cleanupJobArtifacts(jobId);
+            workerNode.recordEvent("CLEANUP completed for job " + jobId);
+            responseObserver.onNext(CleanupJobDataResponse.newBuilder().setSuccess(true).setMessage("Cleanup completed").build());
+            responseObserver.onCompleted();
+        } catch (Exception e) {
+            JMRLog.error(LOGGER, "Error cleaning local worker data for job {}", jobId, e);
+            responseObserver.onNext(CleanupJobDataResponse.newBuilder().setSuccess(false).setMessage(e.getMessage()).build());
+            responseObserver.onCompleted();
+        }
+    }
+
+    private void cleanupJobArtifacts(final String jobId) throws IOException {
+        final List<Pair<String, String>> mapKeys = workerNode.mapTaskResults.keySet().stream().filter(key -> key.getFirst().equals(jobId)).toList();
+        for (final Pair<String, String> key : mapKeys) {
+            workerNode.mapTaskResults.remove(key);
+            workerNode.intermediateStorage.deleteTaskData(key.getSecond());
+        }
+
+        final List<Pair<String, String>> reduceKeys = workerNode.reduceTaskResults.keySet().stream().filter(key -> key.getFirst().equals(jobId)).toList();
+        for (final Pair<String, String> key : reduceKeys) {
+            workerNode.reduceTaskResults.remove(key);
+            workerNode.reduceResultStorage.deleteTaskResult(jobId, key.getSecond());
+        }
+
+        workerNode.statusMap.keySet().removeIf(key -> key.getFirst().equals(jobId));
+
+        final Path jobFile = workerNode.jobStorage.remove(jobId);
+        if (jobFile != null) {
+            Files.deleteIfExists(jobFile);
+        }
+
+        final String jarId = workerNode.forgetJobJar(jobId);
+        if (jarId != null && !workerNode.isJarStillReferenced(jarId)) {
+            final Path jarFile = workerNode.jarStorage.remove(jarId);
+            if (jarFile != null) {
+                Files.deleteIfExists(jarFile);
+            }
+        }
     }
 }

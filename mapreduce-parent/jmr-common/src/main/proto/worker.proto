@@ -28,6 +28,9 @@ service WorkerService {
   
   // Ottiene lo stato del worker
   rpc GetWorkerStatus(GetWorkerStatusRequest) returns (GetWorkerStatusResponse);
+
+  // Pulisce i dati locali relativi a un job terminato
+  rpc CleanupJobData(CleanupJobDataRequest) returns (CleanupJobDataResponse);
 }
 
 message WorkerResources {
@@ -176,4 +179,13 @@ message GetReduceTaskStatusResponse {
 message ReducedData {
   string key = 1;
   bytes value = 2;
+}
+
+message CleanupJobDataRequest {
+  string job_id = 1;
+}
+
+message CleanupJobDataResponse {
+  bool success = 1;
+  string message = 2;
 }

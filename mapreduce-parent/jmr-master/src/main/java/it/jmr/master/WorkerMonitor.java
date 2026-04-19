@@ -2,6 +2,8 @@ package it.jmr.master;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import it.jmr.common.JMRConstants;
 import it.jmr.common.utils.JMRLog;
@@ -15,9 +17,11 @@ import it.jmr.master.models.Worker;
 public class WorkerMonitor implements Runnable {
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(WorkerMonitor.class);
     private final MasterContext ctx;
+    private final Map<String, Integer> consecutiveFailures;
 
     public WorkerMonitor(MasterContext ctx) {
         this.ctx = ctx;
+        this.consecutiveFailures = new ConcurrentHashMap<>();
     }
 
     @Override
@@ -27,9 +31,17 @@ public class WorkerMonitor implements Runnable {
             final List<Worker> deadWorkers = new ArrayList<>();
             for (Worker worker : ctx.workers) {
                 if (!worker.isAlive()) {
-                    deadWorkers.add(worker);
-                    JMRLog.error(LOGGER, "Worker {} ({}:{}) not answering, removed from available workers", worker.getWorkerId(), worker.getAddress(),
-                            worker.getPort());
+                    final int failureCount = consecutiveFailures.merge(worker.getWorkerId(), 1, Integer::sum);
+                    if (failureCount >= JMRConstants.WORKER_HEALTH_FAILURE_THRESHOLD) {
+                        deadWorkers.add(worker);
+                        JMRLog.error(LOGGER, "Worker {} ({}:{}) not answering for {} consecutive checks, removed from available workers",
+                                worker.getWorkerId(), worker.getAddress(), worker.getPort(), failureCount);
+                    } else {
+                        JMRLog.warn(LOGGER, "Worker {} ({}:{}) missed health check {}/{}", worker.getWorkerId(), worker.getAddress(),
+                                worker.getPort(), failureCount, JMRConstants.WORKER_HEALTH_FAILURE_THRESHOLD);
+                    }
+                } else {
+                    consecutiveFailures.remove(worker.getWorkerId());
                 }
             }
 
@@ -37,6 +49,7 @@ public class WorkerMonitor implements Runnable {
 
             // Notify listeners about dead workers
             for (Worker deadWorker : deadWorkers) {
+                consecutiveFailures.remove(deadWorker.getWorkerId());
                 ctx.notifyWorkerFailed(deadWorker);
             }
 

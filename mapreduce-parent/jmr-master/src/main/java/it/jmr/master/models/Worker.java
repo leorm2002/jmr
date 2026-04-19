@@ -23,6 +23,8 @@ import it.jmr.grpc.JarServiceGrpc;
 import it.jmr.grpc.JobServiceGrpc;
 import it.jmr.grpc.worker.GetMapTaskStatusRequest;
 import it.jmr.grpc.worker.GetMapTaskStatusResponse;
+import it.jmr.grpc.worker.CleanupJobDataRequest;
+import it.jmr.grpc.worker.CleanupJobDataResponse;
 import it.jmr.grpc.worker.SubmitMapTaskResponse;
 import it.jmr.grpc.worker.WorkerServiceGrpc;
 import it.jmr.master.WorkerI;
@@ -216,6 +218,27 @@ public class Worker {
         } catch (Exception e) {
             JMRLog.error(LOGGER, "Error getting status for reduce task {} of job {} from worker {}: {}", taskId, jobId, workerId, e.getMessage());
             return Pair.of(WorkerTaskStatus.FAILED, Collections.emptyList());
+        }
+    }
+
+    public boolean cleanupJobData(final String jobId) {
+        try {
+            final CleanupJobDataRequest request = CleanupJobDataRequest.newBuilder().setJobId(jobId).build();
+            final CleanupJobDataResponse response = stub.withDeadlineAfter(JMRConstants.REQUEST_TIMEOUT_S, TimeUnit.SECONDS).cleanupJobData(request);
+            if (!response.getSuccess()) {
+                JMRLog.warn(LOGGER, "Worker {} cleanup for job {} returned failure: {}", workerId, jobId, response.getMessage());
+            }
+            return response.getSuccess();
+        } catch (StatusRuntimeException e) {
+            if (e.getStatus().getCode() == io.grpc.Status.Code.UNAVAILABLE) {
+                JMRLog.debug(LOGGER, "Cleanup skipped for unavailable worker {} on job {}", workerId, jobId);
+            } else {
+                JMRLog.warn(LOGGER, "Unable to cleanup job {} on worker {}: {}", jobId, workerId, e.getMessage());
+            }
+            return false;
+        } catch (Exception e) {
+            JMRLog.warn(LOGGER, "Unexpected cleanup error for job {} on worker {}: {}", jobId, workerId, e.getMessage());
+            return false;
         }
     }
 
