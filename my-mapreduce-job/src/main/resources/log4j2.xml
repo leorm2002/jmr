@@ -6,6 +6,12 @@
     </Appenders>
 
     <Loggers>
+        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyClientHandler" level="ERROR" additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
+        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyServerHandler" level="ERROR" additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
         <Logger name="io.grpc" level="WARN" additivity="false">
             <AppenderRef ref="Console" />
         </Logger>

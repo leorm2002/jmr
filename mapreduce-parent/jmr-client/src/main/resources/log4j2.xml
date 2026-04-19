@@ -11,6 +11,12 @@
     </Appenders>
 
     <Loggers>
+        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyClientHandler" level="error" additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
+        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyServerHandler" level="error" additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
         <Root level="debug">
             <AppenderRef ref="Console" />
         </Root>

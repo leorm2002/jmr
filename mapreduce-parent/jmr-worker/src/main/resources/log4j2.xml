@@ -32,6 +32,8 @@
        ROOT LOGGER
        ============================ -->
     <Loggers>
+        <Logger name="it.jmr" level="info" additivity="true" />
+
         <!-- Livello generale -->
         <Root level="error">
             <AppenderRef ref="Console" />
@@ -45,6 +47,13 @@
 
         <!-- eventualmente silenzia anche le librerie di rete -->
         <Logger name="org.apache.http" level="error" additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
+
+        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyClientHandler" level="error" additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
+        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyServerHandler" level="error" additivity="false">
             <AppenderRef ref="Console" />
         </Logger>
 
