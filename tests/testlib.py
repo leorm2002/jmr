@@ -96,17 +96,42 @@ def stop_cluster(remove_volumes: bool = True) -> None:
     run_streaming(bash_script("stopCluster.sh", *args), timeout=180)
 
 
-def start_cluster(num_workers: int, master_port: int, *, skip_build: bool = True) -> None:
+def start_cluster(
+    num_workers: int,
+    master_port: int,
+    *,
+    skip_build: bool = True,
+    dev: bool = True,
+    master_memory_gb: int | None = None,
+    worker_memory_gb: int | None = None,
+) -> None:
     args = [str(num_workers), str(master_port)]
+    if dev:
+        args.append("--dev")
     if skip_build:
         args.append("--skip-build")
+    if master_memory_gb is not None:
+        args.extend(["--master-memory-gb", str(master_memory_gb)])
+    if worker_memory_gb is not None:
+        args.extend(["--worker-memory-gb", str(worker_memory_gb)])
     run_streaming(bash_script("startCluster.sh", *args), timeout=240)
 
 
-def submit_wordcount(master_port: int, result_file: Path, *, skip_build: bool = True) -> subprocess.Popen[str]:
+def submit_wordcount(
+    master_port: int,
+    result_file: Path,
+    *,
+    skip_build: bool = True,
+    dev: bool = True,
+    memory_gb: int | None = None,
+) -> subprocess.Popen[str]:
     args = [str(master_port)]
+    if dev:
+        args.append("--dev")
     if skip_build:
         args.append("--skip-build")
+    if memory_gb is not None:
+        args.extend(["--memory-gb", str(memory_gb)])
     args.extend(["--result-file", result_file.relative_to(REPO_ROOT).as_posix()])
     return start_process(bash_script("scriptExecuteWc.sh", *args))
 

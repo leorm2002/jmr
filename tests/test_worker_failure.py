@@ -40,6 +40,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--job-timeout", type=int, default=240, help="Timeout in seconds for the job.")
     parser.add_argument("--build", action="store_true", help="Rebuild images/artifacts before starting.")
+    parser.add_argument("--master-memory-gb", type=int, default=2, help="Memory limit for the master container.")
+    parser.add_argument("--worker-memory-gb", type=int, default=2, help="Memory limit for each worker container.")
+    parser.add_argument("--submitter-memory-gb", type=int, default=2, help="Memory limit for the submitter container.")
     return parser.parse_args()
 
 
@@ -51,8 +54,14 @@ def main() -> int:
     main_header("Worker failure test")
 
     try:
-        start_cluster(args.workers, args.master_port, skip_build=not args.build)
-        process = submit_wordcount(args.master_port, result_file, skip_build=not args.build)
+        start_cluster(
+            args.workers,
+            args.master_port,
+            skip_build=not args.build,
+            master_memory_gb=args.master_memory_gb,
+            worker_memory_gb=args.worker_memory_gb,
+        )
+        process = submit_wordcount(args.master_port, result_file, skip_build=not args.build, memory_gb=args.submitter_memory_gb)
 
         phase_marker = "Starting job execution" if args.failure_phase == "map" else "Reduce Progress:"
         phase_timeout = 60 if args.failure_phase == "map" else 180

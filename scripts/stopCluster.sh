@@ -6,7 +6,7 @@ CLUSTER_LABEL="jmr.cluster=wordcount-demo"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/stopCluster.sh [--remove-volumes]
+Usage: scripts/stopCluster.sh
 
 Stops the dynamic Docker cluster started by scripts/startCluster.sh.
 
@@ -18,25 +18,6 @@ EOF
 log_step() {
   printf '==> %s\n' "$1"
 }
-
-REMOVE_VOLUMES="false"
-
-for arg in "$@"; do
-  case "$arg" in
-    --remove-volumes)
-      REMOVE_VOLUMES="true"
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      printf 'Unknown argument: %s\n' "$arg" >&2
-      usage
-      exit 1
-      ;;
-  esac
-done
 
 if ! command -v docker >/dev/null 2>&1; then
   printf 'Missing required command: docker\n' >&2
@@ -63,14 +44,12 @@ else
   log_step "Docker network ${NETWORK_NAME} not found"
 fi
 
-if [[ "${REMOVE_VOLUMES}" == "true" ]]; then
-  volume_names="$(docker volume ls -q --filter "name=^jmr-(master|worker-[0-9]+)-storage$")"
-  if [[ -n "${volume_names}" ]]; then
-    log_step "Removing cluster volumes"
-    docker volume rm ${volume_names} >/dev/null
-  else
-    log_step "No cluster volumes found"
-  fi
+volume_names="$(docker volume ls -q --filter "name=^jmr-(master|worker-[0-9]+)-storage$")"
+if [[ -n "${volume_names}" ]]; then
+  log_step "Removing cluster volumes"
+  docker volume rm ${volume_names} >/dev/null
+else
+  log_step "No cluster volumes found"
 fi
 
 printf '\nCluster stopped successfully.\n'

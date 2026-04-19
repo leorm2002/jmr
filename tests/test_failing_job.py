@@ -22,9 +22,9 @@ def main() -> int:
     try:
         start_cluster(args.workers, args.master_port, skip_build=not args.build)
         failing_job_args = [str(args.master_port), args.failure_phase]
+        failing_job_args.append("--dev")
         if not args.build:
-            # The failing-job launcher lives in the submitter jar, so we rebuild it by default.
-            pass
+            failing_job_args.append("--skip-build")
         completed = run(bash_script("scriptExecuteFailingJob.sh", *failing_job_args), timeout=300)
 
         print_section("Failing submit", completed.stdout)

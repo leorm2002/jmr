@@ -25,6 +25,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--job-gap-seconds", type=float, default=5.0, help="Delay between the two submissions.")
     parser.add_argument("--job-timeout", type=int, default=180, help="Timeout in seconds for each job.")
     parser.add_argument("--build", action="store_true", help="Rebuild images/artifacts before starting.")
+    parser.add_argument("--master-memory-gb", type=int, default=2, help="Memory limit for the master container.")
+    parser.add_argument("--worker-memory-gb", type=int, default=2, help="Memory limit for each worker container.")
+    parser.add_argument("--submitter-memory-gb", type=int, default=2, help="Memory limit for each submitter container.")
     return parser.parse_args()
 
 
@@ -39,15 +42,21 @@ def main() -> int:
 
     try:
         print(f"Starting cluster with {args.workers} workers...")
-        start_cluster(args.workers, args.master_port, skip_build=not args.build)
+        start_cluster(
+            args.workers,
+            args.master_port,
+            skip_build=not args.build,
+            master_memory_gb=args.master_memory_gb,
+            worker_memory_gb=args.worker_memory_gb,
+        )
 
         print(f"Submitting first job (result will be at {result_a})...")
-        process_a = submit_wordcount(args.master_port, result_a, skip_build=not args.build)
+        process_a = submit_wordcount(args.master_port, result_a, skip_build=not args.build, memory_gb=args.submitter_memory_gb)
 
         time.sleep(args.job_gap_seconds)
 
         print(f"Submitting second job (result will be at {result_b})...")
-        process_b = submit_wordcount(args.master_port, result_b, skip_build=True)
+        process_b = submit_wordcount(args.master_port, result_b, skip_build=True, memory_gb=args.submitter_memory_gb)
 
         code_a, output_a = wait_process(process_a, timeout=args.job_timeout)
         code_b, output_b = wait_process(process_b, timeout=args.job_timeout)
