@@ -1,0 +1,143 @@
+name: Release Fat Jars
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - ".github/workflows/release-fat-jars.yml"
+      - "mapreduce-parent/pom.xml"
+      - "mapreduce-parent/jmr-common/**"
+      - "mapreduce-parent/jmr-client/**"
+      - "mapreduce-parent/jmr-master/**"
+      - "mapreduce-parent/jmr-worker/**"
+  pull_request:
+    paths:
+      - ".github/workflows/release-fat-jars.yml"
+      - "mapreduce-parent/pom.xml"
+      - "mapreduce-parent/jmr-common/**"
+      - "mapreduce-parent/jmr-client/**"
+      - "mapreduce-parent/jmr-master/**"
+      - "mapreduce-parent/jmr-worker/**"
+  workflow_dispatch:
+
+concurrency:
+  group: release-fat-jars-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.component.name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - name: master
+            module: jmr-master
+            artifact: jmr-master-fat.jar
+          - name: worker
+            module: jmr-worker
+            artifact: jmr-worker-fat.jar
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+
+      - name: Build fat jar
+        working-directory: mapreduce-parent
+        run: mvn -B -q -pl ${{ matrix.component.module }} -am package -DskipTests
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp mapreduce-parent/${{ matrix.component.module }}/target/*-jar-with-dependencies.jar dist/${{ matrix.component.artifact }}
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.component.module }}-fat-jar
+          path: dist/${{ matrix.component.artifact }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release assets
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download fat jars
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: "*-fat-jar"
+          merge-multiple: true
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "name=Fat Jars ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "notes=Automated fat jar build for tag ${GITHUB_REF_NAME}." >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=fat-jars-main" >> "$GITHUB_OUTPUT"
+            echo "name=Fat Jars main" >> "$GITHUB_OUTPUT"
+            echo "notes=Rolling fat jar release from main for commit ${GITHUB_SHA}." >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update rolling release tag
+        if: github.ref_type != 'tag'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -fa "${{ steps.meta.outputs.tag }}" -m "Rolling fat jar release"
+          git push origin "refs/tags/${{ steps.meta.outputs.tag }}" --force
+
+      - name: Create or update GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+          RELEASE_NAME: ${{ steps.meta.outputs.name }}
+          RELEASE_NOTES: ${{ steps.meta.outputs.notes }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/*.jar --clobber
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_NAME" --notes "$RELEASE_NOTES"
+          else
+            create_args=(
+              "$RELEASE_TAG"
+              dist/*.jar
+              --title "$RELEASE_NAME"
+              --notes "$RELEASE_NOTES"
+            )
+
+            if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+              create_args+=(--prerelease)
+            fi
+
+            gh release create "${create_args[@]}"
+          fi
