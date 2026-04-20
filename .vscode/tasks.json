@@ -25,10 +25,47 @@
             "command": "timeout /t 1 /nobreak",
             "problemMatcher": []
         },
-        {
+		{
             "label": "wait-2s",
             "type": "shell",
             "command": "timeout /t 2 /nobreak",
+            "problemMatcher": []
+        },
+        {
+            "label": "latex-report-pass-1",
+            "type": "shell",
+            "command": "pdflatex",
+            "args": [
+                "-interaction=nonstopmode",
+                "-file-line-error",
+                "distributed-systems-final-report.tex"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/report"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "latex-report-pass-2",
+            "type": "shell",
+            "command": "pdflatex",
+            "args": [
+                "-interaction=nonstopmode",
+                "-file-line-error",
+                "distributed-systems-final-report.tex"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/report"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "latex-report-double-build",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "latex-report-pass-1",
+                "latex-report-pass-2"
+            ],
             "problemMatcher": []
         }
 	]

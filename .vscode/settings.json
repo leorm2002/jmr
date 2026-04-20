@@ -4,5 +4,27 @@
     "editor.formatOnSave": true,
     "java.compile.nullAnalysis.mode": "automatic",
     "java.format.settings.url": ".vscode/formatter.xml",
-    "java.autobuild.enabled": false
+    "java.autobuild.enabled": false,
+    "latex-workshop.latex.outDir": "%DIR%",
+    "latex-workshop.latex.tools": [
+        {
+            "name": "pdflatex",
+            "command": "pdflatex",
+            "args": [
+                "-synctex=1",
+                "-interaction=nonstopmode",
+                "-file-line-error",
+                "%DOC%"
+            ]
+        }
+    ],
+    "latex-workshop.latex.recipes": [
+        {
+            "name": "pdflatex x2",
+            "tools": [
+                "pdflatex",
+                "pdflatex"
+            ]
+        }
+    ]
 }

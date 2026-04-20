@@ -5,19 +5,6 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$generator = Join-Path $scriptRoot "generate_diagrams.py"
-
-if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-    throw "python is required to generate the draw.io sources."
-}
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    throw "docker is required to export the draw.io diagrams."
-}
-
-Write-Host "==> Generating .drawio sources"
-python $generator
-
 $diagramDir = (Resolve-Path $scriptRoot).Path
 $drawioFiles = Get-ChildItem -Path $scriptRoot -Filter *.drawio | Sort-Object Name
 

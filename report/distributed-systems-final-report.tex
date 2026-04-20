@@ -92,26 +92,23 @@ This section defines the requirements for a MapReduce-style library designed to 
 
 \section{Requirements Specification}
 
-This section defines the requirements for a MapReduce-style library designed to enable distributed data processing across compute clusters. The library executes one job at a time, is agnostic to data sources and types, provides fault tolerance for workers, and can operate entirely in-memory.
+This section refines the analysis into the subset of requirements that the implemented project actually targets. The resulting system is a single-master MapReduce library that executes one job at a time, delegates input access to a serializable \texttt{DataProviderClient}, tolerates worker failures, and combines in-memory coordination state with local ephemeral storage on the master and workers.
 
 \subsection{Glossary}
 
 \begin{description}
-    \item[MapReduce] A programming model for processing large datasets in parallel across a distributed cluster.
-    \item[Job] A complete MapReduce computation consisting of map and reduce phases applied to a dataset, configured through a builder pattern.
-    \item[Master Node] The coordinator that manages job scheduling, worker discovery, and monitors worker status. Single point of failure.
-    \item[Worker Node] A compute resource that executes map or reduce tasks. The system supports a virtually unlimited number of workers.
-    \item[Mapper] A user-defined function that processes input data items and produces intermediate key-value pairs.
-    \item[Reducer] A user-defined function that merges all intermediate values associated with the same intermediate key.
-    \item[Combiner] An optional user-defined function that performs local aggregation of mapper outputs before the shuffle phase.
-    \item[Partition] A subdivision of input data distributed across worker nodes for parallel processing.
-    \item[Shuffle Phase] The process of redistributing intermediate key-value pairs from mappers to reducers based on keys.
-    \item[DataProvider] A server-side interface that manages data locally and creates clients for remote access.
-    \item[DataProviderClient] A serializable client that accesses a DataProvider remotely, used by workers to fetch data chunks.
-    \item[Heartbeat] A periodic signal sent by worker nodes to the master to indicate they are operational.
-    \item[Task] A unit of work (either map or reduce) assigned to a worker node.
-    \item[gRPC] The Remote Procedure Call framework used for master-worker communication and data serialization.
-    \item[In-Memory Processing] All data processing occurs in RAM without disk persistence, suitable for datasets that fit entirely in memory.
+    \item[MapReduce] A programming model in which input data are processed by a map phase, redistributed by key, and aggregated by a reduce phase.
+    \item[Job] A complete distributed computation described by a serializable \texttt{JobConfiguration}.
+    \item[Master Node] The central coordinator that stores the FIFO queue, distributes artifacts, assigns tasks, tracks progress, and exposes results. It is intentionally a single point of failure.
+    \item[Worker Node] A runtime process that executes one map or reduce task at a time and exposes gRPC services for execution, status polling, cleanup, and shuffle data transfer.
+    \item[Mapper] A user-defined serializable function that transforms input records into intermediate key-value pairs.
+    \item[Reducer] A user-defined serializable function that aggregates all values associated with the same intermediate key.
+    \item[DataProvider] A server-side abstraction that owns the original dataset and can produce a serializable remote client.
+    \item[DataProviderClient] A serializable client object used by workers to query input size and fetch input chunks remotely.
+    \item[Shuffle Phase] The redistribution of intermediate partitions from map workers to reduce workers.
+    \item[Task] A schedulable unit of work, either a map chunk or a reduce bucket.
+    \item[Liveness Check] The active health probe executed by the master against workers through the standard gRPC health service.
+    \item[gRPC] The remote-procedure-call framework used for client-master, master-worker, worker-worker, and worker-data-provider communication.
 \end{description}
 
 \subsection{Functional Requirements}
@@ -121,33 +118,26 @@ This section defines the requirements for a MapReduce-style library designed to 
 \begin{enumerate}[label=\textbf{FR-JM-\arabic*}]
     \item \textbf{Job Submission via Builder Pattern}
           \begin{itemize}
-              \item The library shall allow users to submit jobs using a fluent builder pattern that specifies: a DataProvider, a Mapper and a Reducer.
-              \item \textit{Acceptance Criterion:} A user can construct a valid Job configuration using the builder pattern with methods \texttt{readFrom()}, \texttt{map()}, and \texttt{reduce()}, and submit it successfully.
+              \item The library shall allow users to build a job through \texttt{readFrom()}, \texttt{map()}, and \texttt{reduce()} and submit it through a client API.
+              \item \textit{Acceptance Criterion:} A user can construct a valid \texttt{JobConfiguration}, upload its fat JAR and serialized job bytes, and start execution successfully.
           \end{itemize}
 
-    \item \textbf{Sequential Job Execution}
+    \item \textbf{Sequential FIFO Execution}
           \begin{itemize}
-              \item The library shall execute only one job at a time.
-              \item \textit{Acceptance Criterion:} When a job is executing, subsequent job submissions do not start execution until the current job completes.
-          \end{itemize}
-
-    \item \textbf{Job Queue Management}
-          \begin{itemize}
-              \item The library shall maintain a FIFO queue for submitted jobs.
-              \item Jobs shall be executed in the order they were submitted, with no priority mechanism.
-              \item \textit{Acceptance Criterion:} Jobs submitted in sequence J1, J2, J3 execute in that exact order, with J2 starting only after J1 completes.
+              \item The library shall execute at most one job at a time and shall keep pending submissions in FIFO order.
+              \item \textit{Acceptance Criterion:} Concurrent submissions are accepted, queued, and executed in arrival order.
           \end{itemize}
 
     \item \textbf{Job Cancellation}
           \begin{itemize}
-              \item The library shall allow users to cancel a job currently in execution.
-              \item \textit{Acceptance Criterion:} A cancellation request terminates the running job within a reasonable time (e.g., 30 seconds), releases all allocated resources, and removes it from the queue.
+              \item The library shall allow cancellation of a running or queued job.
+              \item \textit{Acceptance Criterion:} A cancellation request marks the job as cancelled, stops further scheduling, and triggers cleanup of reachable workers.
           \end{itemize}
 
-    \item \textbf{In-Memory Result Return}
+    \item \textbf{Status and Result Retrieval}
           \begin{itemize}
-              \item The library shall return final job results in-memory to the client process that submitted the job.
-              \item \textit{Acceptance Criterion:} Upon job completion, results are accessible directly in the client process without requiring file I/O or external storage access.
+              \item The library shall expose job status, phase progress, and final serialized result retrieval.
+              \item \textit{Acceptance Criterion:} Clients can query the status of a job and download the final result when the job completes.
           \end{itemize}
 \end{enumerate}
 
@@ -156,27 +146,26 @@ This section defines the requirements for a MapReduce-style library designed to 
 \begin{enumerate}[label=\textbf{FR-DP-\arabic*}]
     \item \textbf{Custom DataProvider Interface}
           \begin{itemize}
-              \item The library shall support user-implemented DataProvider interfaces for custom data sources.
-              \item The DataProvider interface shall include methods: \texttt{init()}, \texttt{getClient()}, and \texttt{close()}.
-              \item \textit{Acceptance Criterion:} A custom DataProvider implementation can be provided to the job builder, initialized successfully, and used to access data.
+              \item The library shall support user-defined \texttt{DataProvider} implementations with lifecycle methods \texttt{init()}, \texttt{getClient()}, and \texttt{close()}.
+              \item \textit{Acceptance Criterion:} A user can plug a custom provider into the builder without changing master or worker code.
           \end{itemize}
 
-    \item \textbf{Serializable Client Creation}
+    \item \textbf{Serializable Remote Access}
           \begin{itemize}
-              \item The library shall create DataProviderClient instances that can be serialized and sent to remote workers.
-              \item \textit{Acceptance Criterion:} A DataProviderClient obtained via \texttt{getClient()} can be serialized, transmitted via gRPC to a worker, and used to fetch data remotely.
+              \item The provider shall produce a serializable \texttt{DataProviderClient} that can be embedded in the job configuration and deserialized on workers.
+              \item \textit{Acceptance Criterion:} Workers can reconstruct the client and use it remotely after the job has been uploaded.
           \end{itemize}
 
     \item \textbf{Chunked Data Fetching}
           \begin{itemize}
-              \item The library shall support fetching data in chunks using offset and limit parameters via the \texttt{fetchChunk(offset, limit)} method.
-              \item \textit{Acceptance Criterion:} Workers can retrieve specific data ranges from the DataProvider using offset/limit, enabling parallel data access.
+              \item Workers shall be able to fetch input data in chunks using offset/limit semantics.
+              \item \textit{Acceptance Criterion:} Different workers can access different non-overlapping ranges of the same input dataset in parallel.
           \end{itemize}
 
     \item \textbf{Data Source Agnosticism}
           \begin{itemize}
-              \item The library shall be agnostic to the underlying data source (files, databases, network streams, etc.).
-              \item \textit{Acceptance Criterion:} Jobs execute successfully with DataProviders backed by different sources (e.g., file-based, database-based) without library modifications.
+              \item The library shall not depend on a specific storage technology for the original input data.
+              \item \textit{Acceptance Criterion:} The same runtime works with file-backed and remote gRPC-backed providers.
           \end{itemize}
 \end{enumerate}
 
@@ -185,35 +174,20 @@ This section defines the requirements for a MapReduce-style library designed to 
 \begin{enumerate}[label=\textbf{FR-MAP-\arabic*}]
     \item \textbf{Custom Map Function}
           \begin{itemize}
-              \item The library shall execute user-defined Mapper functions on input data.
-              \item The library shall be agnostic to the map function logic and data types.
-              \item \textit{Acceptance Criterion:} A Mapper implementation processes input items and produces intermediate key-value pairs according to user-defined logic.
+              \item The runtime shall execute user-defined serializable mapper functions without constraining their application logic.
+              \item \textit{Acceptance Criterion:} A valid job can transform arbitrary serializable input items into intermediate key-value pairs.
           \end{itemize}
 
     \item \textbf{Automatic Data Partitioning}
           \begin{itemize}
-              \item The library shall automatically partition input data across available workers by default.
-              \item \textit{Acceptance Criterion:} Input data is divided into partitions equal to the number of available workers, with balanced distribution.
-          \end{itemize}
-
-    \item \textbf{Custom Partitioning Function}
-          \begin{itemize}
-              \item The library shall allow users to provide a custom partitioning function to control how input data is divided.
-              \item \textit{Acceptance Criterion:} When a custom partitioning function is provided, data is partitioned according to the user-defined logic instead of the default strategy.
+              \item The master shall partition the input automatically according to the number of available workers.
+              \item \textit{Acceptance Criterion:} The runtime creates multiple map tasks from the input size and schedules them without user-managed chunking.
           \end{itemize}
 
     \item \textbf{Parallel Map Execution}
           \begin{itemize}
-              \item The library shall execute map tasks in parallel across worker nodes.
-              \item Each worker shall execute exactly one map task at a time.
-              \item \textit{Acceptance Criterion:} Map tasks are distributed to all available workers, with each worker processing one partition simultaneously.
-          \end{itemize}
-
-    \item \textbf{Optional Combiner Function}
-          \begin{itemize}
-              \item The library shall support an optional user-defined combiner function for local aggregation of mapper outputs.
-              \item The combiner shall execute on worker nodes before the shuffle phase.
-              \item \textit{Acceptance Criterion:} When a combiner function is provided, it processes mapper outputs locally on each worker, reducing the volume of data transferred during shuffle.
+              \item Map tasks shall execute in parallel across workers, with at most one task active per worker.
+              \item \textit{Acceptance Criterion:} When multiple workers are available, different map chunks are processed concurrently.
           \end{itemize}
 \end{enumerate}
 
@@ -222,80 +196,58 @@ This section defines the requirements for a MapReduce-style library designed to 
 \begin{enumerate}[label=\textbf{FR-RED-\arabic*}]
     \item \textbf{Custom Reduce Function}
           \begin{itemize}
-              \item The library shall execute user-defined Reducer functions on grouped intermediate values.
-              \item The library shall be agnostic to the reduce function logic and output data types.
-              \item \textit{Acceptance Criterion:} A Reducer implementation receives all values for a key and produces final output according to user-defined logic.
+              \item The runtime shall execute user-defined serializable reducer functions without constraining their application logic.
+              \item \textit{Acceptance Criterion:} A valid job can aggregate all values associated with one intermediate key into an arbitrary serializable output.
           \end{itemize}
 
     \item \textbf{Automatic Shuffle}
           \begin{itemize}
-              \item The library shall automatically redistribute intermediate key-value pairs from mappers to reducers by default.
-              \item All values for a given key shall be sent to the same reducer.
-              \item \textit{Acceptance Criterion:} After the map phase, intermediate data is redistributed such that each reducer receives all values for its assigned keys.
-          \end{itemize}
-
-    \item \textbf{Custom Shuffle/Hash Function}
-          \begin{itemize}
-              \item The library shall allow users to provide a custom hash function to control key-to-reducer assignment.
-              \item \textit{Acceptance Criterion:} When a custom hash function is provided, keys are assigned to reducers according to the user-defined hashing logic.
+              \item The runtime shall assign intermediate keys to reduce buckets automatically and shall fetch the corresponding partitions during the reduce phase.
+              \item \textit{Acceptance Criterion:} All values for the same intermediate key reach the same reducer bucket.
           \end{itemize}
 
     \item \textbf{Reducer Count Based on Worker Count}
           \begin{itemize}
-              \item The library shall set the number of reducers equal to the number of available workers.
-              \item \textit{Acceptance Criterion:} The reduce phase uses exactly as many reducers as there are workers discovered at job start.
+              \item The master shall derive the reduce bucket count from the number of available workers.
+              \item \textit{Acceptance Criterion:} The reduce phase creates a non-zero number of buckets proportional to the worker count discovered at job start.
           \end{itemize}
 
     \item \textbf{Parallel Reduce Execution}
           \begin{itemize}
-              \item The library shall execute reduce tasks in parallel across worker nodes.
-              \item Each worker shall execute exactly one reduce task at a time.
-              \item \textit{Acceptance Criterion:} Reduce tasks are distributed to all available workers, with each worker processing one key partition simultaneously.
+              \item Reduce tasks shall execute in parallel across workers, again respecting the one-task-per-worker constraint.
+              \item \textit{Acceptance Criterion:} Multiple non-empty reduce buckets can be processed concurrently by distinct workers.
           \end{itemize}
 \end{enumerate}
 
 \subsubsection{Fault Tolerance}
 
 \begin{enumerate}[label=\textbf{FR-FT-\arabic*}]
-    \item \textbf{Worker Heartbeat Monitoring}
+    \item \textbf{Worker Liveness Monitoring}
           \begin{itemize}
-              \item The library shall monitor worker nodes using periodic heartbeat signals.
-              \item \textit{Acceptance Criterion:} Workers send heartbeat messages to the master at regular intervals, and the master tracks receipt of these signals.
+              \item The master shall monitor workers through periodic active health checks.
+              \item \textit{Acceptance Criterion:} Unreachable workers are detected after a bounded number of failed health probes.
           \end{itemize}
 
-    \item \textbf{Worker Failure Detection}
+    \item \textbf{Automatic Task Reassignment and Replay}
           \begin{itemize}
-              \item The library shall detect worker node failures when heartbeats are not received within a configured timeout period.
-              \item \textit{Acceptance Criterion:} When a worker fails to send a heartbeat within the timeout period, the master marks it as failed.
-          \end{itemize}
-
-    \item \textbf{Automatic Task Reassignment}
-          \begin{itemize}
-              \item The library shall automatically reassign map and reduce tasks from failed workers to available healthy workers.
-              \item \textit{Acceptance Criterion:} When a worker fails during task execution, its tasks are reassigned to other workers and re-executed successfully.
-          \end{itemize}
-
-    \item \textbf{Job Completion Despite Worker Failures}
-          \begin{itemize}
-              \item The library shall ensure job completion as long as at least one worker remains operational.
-              \item \textit{Acceptance Criterion:} A job completes successfully even when multiple workers fail during execution, provided at least one worker remains available.
+              \item The library shall reassign tasks owned by failed workers and shall replay completed map tasks if their intermediate outputs are lost.
+              \item \textit{Acceptance Criterion:} A job can continue after worker loss as long as enough workers remain reachable and retry limits are not exceeded.
           \end{itemize}
 
     \item \textbf{No Master Failover}
           \begin{itemize}
-              \item The library shall NOT provide automatic failover for master node failures.
-              \item Master failure results in job termination.
-              \item \textit{Acceptance Criterion:} When the master node fails, the current job terminates and cannot be recovered automatically.
+              \item The project shall not implement automatic master failover.
+              \item \textit{Acceptance Criterion:} If the master process terminates, the active job is interrupted and requires manual restart.
           \end{itemize}
 \end{enumerate}
 
 \subsubsection{Worker Discovery and Communication}
 
 \begin{enumerate}[label=\textbf{FR-WDC-\arabic*}]
-    \item \textbf{Automatic Worker Discovery}
+    \item \textbf{Static Configuration with Optional Discovery}
           \begin{itemize}
-              \item The library shall automatically discover available worker nodes through network scanning at master startup.
-              \item \textit{Acceptance Criterion:} At initialization, the master identifies all available workers on the network without manual configuration.
+              \item The cluster shall support statically configured workers and optionally JmDNS-based discovery at startup.
+              \item \textit{Acceptance Criterion:} The master can run both with explicit worker endpoints and with service discovery enabled.
           \end{itemize}
 
           % \item \textbf{Dynamic Worker Registration}
@@ -306,8 +258,8 @@ This section defines the requirements for a MapReduce-style library designed to 
 
     \item \textbf{gRPC Communication}
           \begin{itemize}
-              \item The library shall use gRPC for all master-worker communication.
-              \item \textit{Acceptance Criterion:} All remote procedure calls between master and workers use gRPC protocol.
+              \item The library shall use gRPC for client-master, master-worker, worker-worker, and worker-data-provider communication.
+              \item \textit{Acceptance Criterion:} All distributed control and data exchange happens through gRPC services defined in the project.
           \end{itemize}
 
           % \item \textbf{gRPC Serialization}
@@ -322,14 +274,14 @@ This section defines the requirements for a MapReduce-style library designed to 
 \begin{enumerate}[label=\textbf{FR-MON-\arabic*}]
     \item \textbf{Structured Job Status}
           \begin{itemize}
-              \item The library shall provide structured job status information with states: WAITING, PROCESSING, DONE.
-              \item \textit{Acceptance Criterion:} Users can query job status and receive one of the defined states accurately reflecting the job's current phase.
+              \item The library shall provide structured job status information and phase progress.
+              \item \textit{Acceptance Criterion:} Clients and dashboards can observe statuses such as \texttt{PENDING}, \texttt{RUNNING}, \texttt{COMPLETED}, \texttt{FAILED}, and \texttt{CANCELLED}.
           \end{itemize}
 
-    \item \textbf{Textual Logging}
+    \item \textbf{Textual Logging and Dashboards}
           \begin{itemize}
-              \item The library shall provide detailed textual logging for job execution, task assignment, and errors.
-              \item \textit{Acceptance Criterion:} Log messages are generated for significant events (job start, task assignment, failures, completion) and are accessible for debugging.
+              \item The library shall provide detailed textual logging and lightweight dashboards for job execution, task assignment, and errors.
+              \item \textit{Acceptance Criterion:} Significant runtime events are visible through log streams and HTTP monitoring pages.
           \end{itemize}
 
 \end{enumerate}
@@ -337,127 +289,93 @@ This section defines the requirements for a MapReduce-style library designed to 
 \subsection{Non-Functional Requirements}
 
 \begin{enumerate}[label=\textbf{NFR-\arabic*}]
-    \item \textbf{In-Memory Processing}
+    \item \textbf{Mixed Transient Storage Model}
           \begin{itemize}
-              \item The library shall perform all data processing entirely in memory without disk persistence.
-              \item The library is suitable only for datasets that fit completely in available cluster memory.
-              \item \textit{Acceptance Criterion:} No disk I/O occurs during job execution except for logging.
+              \item The runtime shall combine in-memory coordination metadata with local ephemeral persistence for execution artifacts when useful.
+              \item \textit{Acceptance Criterion:} The master keeps queue and progress state in memory, while workers can persist intermediate and reduced outputs locally for recovery and cleanup.
           \end{itemize}
 
     \item \textbf{Single Task Per Worker}
           \begin{itemize}
-              \item Each worker node shall execute at most one map or reduce task simultaneously.
-              \item \textit{Acceptance Criterion:} Monitoring shows that workers never execute more than one task concurrently.
+              \item Each worker shall execute at most one task at a time.
+              \item \textit{Acceptance Criterion:} Workers reject new work while already busy, and no worker runs two task pipelines concurrently.
           \end{itemize}
 
-    \item \textbf{Virtually Unlimited Worker Scalability}
+    \item \textbf{Worker-Failure Recovery}
           \begin{itemize}
-              \item The library shall support a virtually unlimited number of worker nodes.
-              \item There shall be no hard-coded limit on worker count.
-              \item \textit{Acceptance Criterion:} The system successfully manages clusters with 10, 100, and 1000+ workers without architectural limitations.
+              \item Worker crashes shall be handled automatically by the runtime without requiring client intervention.
+              \item \textit{Acceptance Criterion:} Map or reduce tasks assigned to failed workers are re-queued or replayed according to the retry policy.
           \end{itemize}
 
-    \item \textbf{Automatic Failure Recovery}
+    \item \textbf{Type and Function Agnosticism}
           \begin{itemize}
-              \item The library shall automatically recover from worker failures without user intervention.
-              \item \textit{Acceptance Criterion:} Worker failures during job execution are detected and recovered automatically, with the job completing successfully.
+              \item The runtime shall support arbitrary serializable input, intermediate, and output types, together with arbitrary serializable mapper and reducer logic.
+              \item \textit{Acceptance Criterion:} The framework does not encode domain-specific assumptions about processed records or produced keys.
           \end{itemize}
 
-    \item \textbf{Job Completion Guarantee}
+    \item \textbf{Reproducible Deployment}
           \begin{itemize}
-              \item The library shall guarantee job completion as long as sufficient workers remain operational and memory is available.
-              \item \textit{Acceptance Criterion:} Jobs complete successfully in test scenarios with various worker failure patterns, provided at least one worker remains.
-          \end{itemize}
-
-    \item \textbf{Data Type Agnosticism}
-          \begin{itemize}
-              \item The library shall impose no restrictions on input, intermediate, or output data types beyond serialization requirements.
-              \item \textit{Acceptance Criterion:} Jobs execute successfully with various custom data types implementing Serializable interface.
-          \end{itemize}
-
-    \item \textbf{Function Agnosticism}
-          \begin{itemize}
-              \item The library shall impose no restrictions on the logic implemented in map, reduce, combiner, partitioning, or shuffle functions.
-              \item \textit{Acceptance Criterion:} Jobs execute successfully with diverse user-defined function implementations ranging from simple to complex algorithms.
-          \end{itemize}
-
-    \item \textbf{Usability Through Builder Pattern}
-          \begin{itemize}
-              \item The library shall provide an intuitive fluent API through the builder pattern for job configuration.
-              \item \textit{Acceptance Criterion:} Developers can configure and submit a complete job with clear, self-documenting code using method chaining.
+              \item The system shall be runnable both as ordinary Java processes and through Dockerized scripts used during validation.
+              \item \textit{Acceptance Criterion:} The same codebase can be exercised locally and in containers without changing its public programming model.
           \end{itemize}
 
     \item \textbf{Resource Cleanup}
           \begin{itemize}
-              \item The library shall properly release all resources (connections, memory, threads) when jobs complete or are cancelled.
-              \item \textit{Acceptance Criterion:} Memory profiling shows no resource leaks after job completion. DataProvider \texttt{close()} method is invoked properly.
+              \item The runtime shall clean up temporary artifacts and close open resources when a job terminates.
+              \item \textit{Acceptance Criterion:} Reachable workers receive cleanup commands and data-provider clients are closed after use.
           \end{itemize}
 \end{enumerate}
 
 \subsection{Implementation Requirements}
 
 \begin{enumerate}[label=\textbf{IR-\arabic*}]
-    \item \textbf{Java Programming Language}
+    \item \textbf{Java Implementation}
           \begin{itemize}
-              \item The library shall be implemented in Java.
-              \item \textit{Acceptance Criterion:} All library components are implemented in Java and compile with a standard Java compiler (JDK 21 or higher).
+              \item The library shall be implemented in Java and built with Maven.
+              \item \textit{Acceptance Criterion:} The project compiles and tests successfully with JDK 21 and Maven.
           \end{itemize}
 
-    \item \textbf{gRPC Framework}
+    \item \textbf{gRPC and Protocol Buffers}
           \begin{itemize}
-              \item The library shall use gRPC for inter-node communication and serialization.
-              \item \textit{Justification:} gRPC provides efficient RPC with built-in serialization, suitable for distributed systems requiring high performance.
-              \item \textit{Acceptance Criterion:} All master-worker communication uses gRPC services, and gRPC serialization is used for data transfer.
-          \end{itemize}
-
-    \item \textbf{SLF4J Logging}
-          \begin{itemize}
-              \item The library shall use SLF4J as the logging facade.
-              \item \textit{Justification:} SLF4J provides abstraction over logging implementations, allowing users to choose their preferred backend (Logback, Log4j, etc.).
-              \item \textit{Acceptance Criterion:} All logging calls use SLF4J API, and the library functions correctly with different SLF4J-compatible backends.
+              \item Inter-node APIs shall be defined through Protocol Buffers and implemented with gRPC.
+              \item \textit{Acceptance Criterion:} Master, worker, and data-provider services exchange requests and responses through generated gRPC stubs.
           \end{itemize}
 
     \item \textbf{Fat JAR Distribution}
           \begin{itemize}
-              \item The library will require users to package their map, reduce, combiner, partitioning, and hash functions along with all dependencies into a fat JAR (uber JAR).
-              \item The fat JAR shall be distributed to all worker nodes to ensure function execution.
-              \item \textit{Justification:} User-defined functions may have custom dependencies that must be available on worker nodes. A fat JAR ensures complete dependency resolution and eliminates classpath issues in distributed environments.
-              \item \textit{Acceptance Criterion:} Workers can successfully load and execute user-defined functions from a provided fat JAR containing all necessary classes and dependencies.
+              \item User jobs shall be packaged with their dependencies in a fat JAR and replicated to all workers before execution.
+              \item \textit{Acceptance Criterion:} Remote workers can deserialize and execute user code without relying on an external shared classpath.
           \end{itemize}
 
-    \item \textbf{Java Native Serialization for Job Configuration}
+    \item \textbf{Java Serialization for Job Payloads}
           \begin{itemize}
-              \item The library shall use Java's built-in serialization mechanism for serializing JobConfiguration objects.
-              \item \textit{Justification:} Java native serialization provides a straightforward mechanism for object serialization that integrates seamlessly with the Serializable interface requirement.
-              \item \textit{Acceptance Criterion:} JobConfiguration objects are serialized and deserialized using Java's ObjectOutputStream/ObjectInputStream, maintaining object integrity across network transmission.
+              \item Job configurations, user functions, and runtime payloads shall use Java serialization where required by the execution pipeline.
+              \item \textit{Acceptance Criterion:} Uploaded job configurations can be serialized, transmitted, and deserialized consistently on remote workers.
           \end{itemize}
 
-    \item \textbf{Bare Metal Deployment Support}
+    \item \textbf{SLF4J-Based Logging}
           \begin{itemize}
-              \item The library shall support deployment as a standard Java application on bare metal servers.
-              \item \textit{Justification:} Traditional enterprise environments may require direct deployment without containerization.
-              \item \textit{Acceptance Criterion:} The library runs successfully as a Java application on physical or virtual machines without container requirements.
+              \item The implementation shall expose logging through SLF4J-compatible backends.
+              \item \textit{Acceptance Criterion:} Runtime events are emitted through the configured logging facade and can be mirrored into dashboards.
           \end{itemize}
 
-    \item \textbf{Docker Container Support}
+    \item \textbf{Serializable User Components}
           \begin{itemize}
-              \item The library shall support deployment in Docker containers.
-              \item \textit{Justification:} Containerization provides environment consistency, easy deployment, and scalability in modern cloud infrastructures.
-              \item \textit{Acceptance Criterion:} Master and worker components can be packaged as Docker images and deployed in containerized environments.
+              \item User-provided data types, mappers, reducers, and \texttt{DataProviderClient} implementations shall be serializable.
+              \item \textit{Acceptance Criterion:} The distributed execution path can transport these components without custom marshalling code from the user.
           \end{itemize}
 
-    \item \textbf{Serializable Interface Requirement}
+    \item \textbf{Docker Support}
           \begin{itemize}
-              \item All user-provided data types, functions (mapper, reducer, combiner, partitioner, hash), and DataProvider implementations shall implement Java's Serializable interface.
-              \item \textit{Justification:} Serialization is required for transmitting objects across network boundaries via gRPC.
-              \item \textit{Acceptance Criterion:} The library validates that all user-provided components implement Serializable and provides clear error messages when this requirement is not met.
+              \item The project shall provide a Docker-based deployment path for reproducible experiments.
+              \item \textit{Acceptance Criterion:} Master, worker, and demo jobs can be launched with the supplied Docker scripts and compose configuration.
           \end{itemize}
 \end{enumerate}
 
 \subsection{Relevant Distributed System Features}
 \label{ds-features}
 
-This section analyzes which distributed system features are relevant for the MapReduce library and provides justification for their importance or exclusion.
+This section highlights the distributed-system properties that matter most for the implemented library and deliberately ignores properties that are outside the scope of the project.
 
 \subsubsection{Transparency}
 
