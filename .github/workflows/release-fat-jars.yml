@@ -29,20 +29,10 @@ concurrency:
 
 jobs:
   build:
-    name: Build ${{ matrix.component.name }}
+    name: Build fat jars
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        component:
-          - name: master
-            module: jmr-master
-            artifact: jmr-master-fat.jar
-          - name: worker
-            module: jmr-worker
-            artifact: jmr-worker-fat.jar
 
     steps:
       - name: Checkout
@@ -57,19 +47,15 @@ jobs:
 
       - name: Build fat jar
         working-directory: mapreduce-parent
-        run: mvn -B -q -pl ${{ matrix.component.module }} -am package -DskipTests
+        run: mvn -B -q -pl jmr-master,jmr-worker -am clean package -DskipTests
 
-      - name: Prepare artifact
-        shell: bash
-        run: |
-          mkdir -p dist
-          cp mapreduce-parent/${{ matrix.component.module }}/target/*-jar-with-dependencies.jar dist/${{ matrix.component.artifact }}
-
-      - name: Upload workflow artifact
+      - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.component.module }}-fat-jar
-          path: dist/${{ matrix.component.artifact }}
+          name: fat-jars
+          path: |
+            mapreduce-parent/jmr-master/target/jmr-master.jar
+            mapreduce-parent/jmr-worker/target/jmr-worker.jar
           if-no-files-found: error
 
   release:
@@ -90,8 +76,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: "*-fat-jar"
-          merge-multiple: true
+          name: fat-jars
 
       - name: Resolve release metadata
         id: meta
