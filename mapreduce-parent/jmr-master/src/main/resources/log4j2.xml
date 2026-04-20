@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Configuration status="ERROR">
 
-    <!-- ============================
-       APPENDER: Console
-       ============================ -->
     <Appenders>
+        <!-- ============================
+           APPENDER: Console
+           ============================ -->
         <Console name="Console" target="SYSTEM_OUT">
             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss} [%t] %-5level %logger{36} - %msg%n" />
         </Console>
@@ -19,38 +19,40 @@
                 <pattern>%d{yyyy-MM-dd HH:mm:ss} [%t] %-5level %logger{36} - %msg%n</pattern>
             </PatternLayout>
             <Policies>
-                <!-- Rollover giornaliero -->
                 <TimeBasedTriggeringPolicy />
-                <!-- oppure: per dimensione -->
                 <SizeBasedTriggeringPolicy size="10MB" />
             </Policies>
             <DefaultRolloverStrategy max="5" />
         </RollingFile>
     </Appenders>
 
-    <!-- ============================
-       ROOT LOGGER
-       ============================ -->
     <Loggers>
         <!-- Livello generale -->
-        <Root level="info">
+        <Root level="DEBUG">
             <AppenderRef ref="Console" />
         </Root>
 
-        <!-- Silenzia JmDNS -->
+        <!-- Silenzia vari rumorosi -->
         <Logger name="javax.jmdns" level="warn" additivity="false">
             <AppenderRef ref="Console" />
         </Logger>
 
-        <!-- eventualmente silenzia anche le librerie di rete -->
         <Logger name="org.apache.http" level="warn" additivity="false">
             <AppenderRef ref="Console" />
         </Logger>
 
-        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyClientHandler" level="error" additivity="false">
+        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyClientHandler" level="ERROR"
+            additivity="false">
             <AppenderRef ref="Console" />
         </Logger>
-        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyServerHandler" level="error" additivity="false">
+        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyServerHandler" level="ERROR"
+            additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
+        <Logger name="io.grpc" level="WARN" additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
+        <Logger name="io.netty" level="WARN" additivity="false">
             <AppenderRef ref="Console" />
         </Logger>
 

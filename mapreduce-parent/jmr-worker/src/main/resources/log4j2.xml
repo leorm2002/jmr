@@ -31,29 +31,34 @@
     <!-- ============================
        ROOT LOGGER
        ============================ -->
-    <Loggers>
-        <Logger name="it.jmr" level="info" additivity="true" />
 
+    <Loggers>
         <!-- Livello generale -->
-        <Root level="error">
+        <Root level="DEBUG">
             <AppenderRef ref="Console" />
-            <AppenderRef ref="FileLogger" />
         </Root>
 
-        <!-- Silenzia JmDNS -->
-        <Logger name="javax.jmdns" level="error" additivity="false">
+        <!-- Silenzia vari rumorosi -->
+        <Logger name="javax.jmdns" level="warn" additivity="false">
             <AppenderRef ref="Console" />
         </Logger>
 
-        <!-- eventualmente silenzia anche le librerie di rete -->
-        <Logger name="org.apache.http" level="error" additivity="false">
+        <Logger name="org.apache.http" level="warn" additivity="false">
             <AppenderRef ref="Console" />
         </Logger>
 
-        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyClientHandler" level="error" additivity="false">
+        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyClientHandler" level="ERROR"
+            additivity="false">
             <AppenderRef ref="Console" />
         </Logger>
-        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyServerHandler" level="error" additivity="false">
+        <Logger name="io.grpc.netty.shaded.io.grpc.netty.NettyServerHandler" level="ERROR"
+            additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
+        <Logger name="io.grpc" level="WARN" additivity="false">
+            <AppenderRef ref="Console" />
+        </Logger>
+        <Logger name="io.netty" level="WARN" additivity="false">
             <AppenderRef ref="Console" />
         </Logger>
 
@@ -61,5 +66,4 @@
             <AppenderRef ref="Console" />
         </Logger>
     </Loggers>
-
 </Configuration>
