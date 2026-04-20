@@ -1,0 +1,172 @@
+<mxfile host="65bd71144e">
+    <diagram id="2" name="Job submission sequence">
+        <mxGraphModel dx="2031" dy="1340" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1760" pageHeight="980" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="3" value="Job Submission and Bootstrap Sequence" style="text;html=1;align=center;verticalAlign=middle;strokeColor=none;fillColor=none;fontSize=16;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="20" y="10" width="430" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="4" value="Client / submitter" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;strokeWidth=2;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="1" vertex="1">
+                    <mxGeometry x="90" y="40" width="170" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="5" value="" style="shape=line;strokeColor=#666666;dashed=1;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="174" y="120" width="2" height="700" as="geometry"/>
+                </mxCell>
+                <mxCell id="6" value="GrpcDataProvider" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;strokeWidth=2;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="1" vertex="1">
+                    <mxGeometry x="400" y="40" width="170" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="7" value="" style="shape=line;strokeColor=#666666;dashed=1;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="484" y="120" width="2" height="700" as="geometry"/>
+                </mxCell>
+                <mxCell id="8" value="Master" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;strokeWidth=2;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="1" vertex="1">
+                    <mxGeometry x="846" y="40" width="170" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="9" value="" style="shape=line;strokeColor=#666666;dashed=1;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="844" y="120" width="2" height="700" as="geometry"/>
+                </mxCell>
+                <mxCell id="10" value="Workers" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;strokeWidth=2;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="1" vertex="1">
+                    <mxGeometry x="1120" y="40" width="170" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="11" value="" style="shape=line;strokeColor=#666666;dashed=1;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="1204" y="120" width="2" height="700" as="geometry"/>
+                </mxCell>
+                <mxCell id="12" value="MasterExecutor" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;strokeWidth=2;fillColor=#e1d5e7;strokeColor=#9673a6;" parent="1" vertex="1">
+                    <mxGeometry x="1450" y="40" width="170" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="13" value="" style="shape=line;strokeColor=#666666;dashed=1;strokeWidth=2;" parent="1" vertex="1">
+                    <mxGeometry x="1534" y="120" width="2" height="700" as="geometry"/>
+                </mxCell>
+                <mxCell id="14" value="1. create provider and expose remote client" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="26" target="28" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="260" y="190"/>
+                            <mxPoint x="260" y="190"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="15" value="2. uploadJar(stream)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="5" target="29" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="370" y="220"/>
+                            <mxPoint x="370" y="220"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="16" value="3. MasterResourceDistributor forwards JAR" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="29" target="11" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1120" y="270"/>
+                            <mxPoint x="1120" y="270"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="17" value="4. uploadJob(serialized JobConfiguration)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="5" target="29" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="390" y="350"/>
+                            <mxPoint x="390" y="350"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="18" value="5. MasterResourceDistributor forwards job bytes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="29" target="30" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1140" y="400"/>
+                            <mxPoint x="1140" y="400"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="19" value="6. submitJob(jarId, jobId)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="5" target="29" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="770" y="470"/>
+                            <mxPoint x="770" y="470"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="20" value="7. enqueue in FIFO queue" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" target="31" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="933" y="491"/>
+                            <mxPoint x="1229" y="491"/>
+                            <mxPoint x="1229" y="490"/>
+                        </Array>
+                        <mxPoint x="932.6666666666665" y="490" as="sourcePoint"/>
+                        <mxPoint x="1536" y="450" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="21" value="8. deserialize job and call size() on DataProviderClient" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="31" target="28" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1270" y="560"/>
+                            <mxPoint x="1270" y="560"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="22" value="9. push MAP tasks to free workers" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="13" target="30" edge="1">
+                    <mxGeometry x="0.0009" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1230" y="610"/>
+                            <mxPoint x="1230" y="610"/>
+                        </Array>
+                        <mxPoint x="1190" y="640" as="targetPoint"/>
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="23" value="10. fetchChunk(offset, limit)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" parent="1" source="30" target="28" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="690" y="660"/>
+                            <mxPoint x="690" y="660"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="24" value="The master pushes artifacts only once, then executes one job at a time.&lt;br&gt;Workers acknowledge task reception immediately and complete work asynchronously." style="rounded=1;whiteSpace=wrap;html=1;fontSize=12;fillColor=#fff2cc;strokeColor=#d6b656;dashed=1;" parent="1" vertex="1">
+                    <mxGeometry x="1390" y="1060" width="430" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="26" value="" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;newEdgeStyle={&quot;curved&quot;:0,&quot;rounded&quot;:0};participant=umlActor;" vertex="1" parent="1">
+                    <mxGeometry x="165" y="120" width="20" height="800" as="geometry"/>
+                </mxCell>
+                <mxCell id="28" value=":Object" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;newEdgeStyle={&quot;curved&quot;:0,&quot;rounded&quot;:0};" vertex="1" parent="1">
+                    <mxGeometry x="450" y="130" width="100" height="800" as="geometry"/>
+                </mxCell>
+                <mxCell id="32" value="" style="shape=umlDestroy;whiteSpace=wrap;html=1;strokeWidth=3;targetShapes=umlLifeline;" vertex="1" parent="28">
+                    <mxGeometry x="34" y="780" width="30" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="29" value="" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;newEdgeStyle={&quot;curved&quot;:0,&quot;rounded&quot;:0};participant=umlActor;" vertex="1" parent="1">
+                    <mxGeometry x="921" y="120" width="20" height="810" as="geometry"/>
+                </mxCell>
+                <mxCell id="30" value="" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;newEdgeStyle={&quot;curved&quot;:0,&quot;rounded&quot;:0};participant=umlActor;" vertex="1" parent="1">
+                    <mxGeometry x="1195" y="120" width="20" height="810" as="geometry"/>
+                </mxCell>
+                <mxCell id="31" value="" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=1;dropTarget=0;collapsible=0;recursiveResize=0;outlineConnect=0;portConstraint=eastwest;newEdgeStyle={&quot;curved&quot;:0,&quot;rounded&quot;:0};participant=umlActor;" vertex="1" parent="1">
+                    <mxGeometry x="1525" y="130" width="20" height="800" as="geometry"/>
+                </mxCell>
+                <mxCell id="33" value="Execution of the map execute algorithm" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=19;" vertex="1" parent="1">
+                    <mxGeometry x="860" y="700" width="750" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="34" value="11. fetchResult(jobId)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;" edge="1" parent="1" target="29">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="550" y="850"/>
+                            <mxPoint x="550" y="850"/>
+                        </Array>
+                        <mxPoint x="174" y="850" as="sourcePoint"/>
+                        <mxPoint x="928" y="850" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="35" value="11. Terminate data provider" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeWidth=2;entryX=0.733;entryY=0.167;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" target="32">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="174" y="920"/>
+                            <mxPoint x="506" y="920"/>
+                        </Array>
+                        <mxPoint x="180" y="920" as="sourcePoint"/>
+                        <mxPoint x="928" y="900" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>
