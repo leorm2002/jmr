@@ -2,18 +2,18 @@
 
 
 ## Avvio manuale tramite fat jar
-
+Una volta avviato si potrà trovare la dashboard del master al suo ip alla porta assegnata + 1000 (es 11000 nel caso sotto)
 ### Avvio con discovery automatico
 
 ####  Avvio dei worker
 
-java -Djava.net.preferIPv4Stack=true -jar jmr-worker-fat.jar -p 1001 -w 1 -sd .
+java -Djava.net.preferIPv4Stack=true -jar jmr-worker-fat.jar -p 10001 -w 1 -sd .
 
-java -Djava.net.preferIPv4Stack=true -jar jmr-worker-fat.jar -p 1002 -w 2 -sd .
+java -Djava.net.preferIPv4Stack=true -jar jmr-worker-fat.jar -p 10002 -w 2 -sd .
 
 #### Avvio del master
 
-java -Djava.net.preferIPv4Stack=true -jar .\jmr-master-fat.jar -p 1000 -sd .
+java -Djava.net.preferIPv4Stack=true -jar .\jmr-master-fat.jar -p 10000 -sd .
 
 
 ### Avvio con indirizzi statici
