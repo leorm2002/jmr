@@ -8,9 +8,13 @@ $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptRoot "..")
-$composeFile = Join-Path $repoRoot "docker-compose.yml"
+$clusterComposeFile = Join-Path $repoRoot "docker-compose.yml"
+$submitterComposeFile = Join-Path $repoRoot "docker-compose.submitter.yml"
+$submitterEnvFile = Join-Path $repoRoot "submitter.env"
+$submitterProjectName = "jmr-submitter"
 $resultDirectory = Join-Path $repoRoot "docker-output"
-$resultFile = Join-Path $resultDirectory "wordcount-result.ser"
+$resultFileName = "wordcount-result.ser"
+$resultFile = Join-Path $resultDirectory $resultFileName
 
 function Invoke-Step {
     param(
@@ -88,22 +92,12 @@ if (Test-Path $resultFile) {
 }
 
 if (-not $SkipBuild) {
-    Invoke-Step "Building MapReduce modules" {
-        Push-Location (Join-Path $repoRoot "mapreduce-parent")
-        try {
-            mvn -q install -DskipTests
-        } finally {
-            Pop-Location
-        }
+    Invoke-Step "Pulling cluster images from Docker Hub" {
+        docker compose -f $clusterComposeFile pull
     }
 
-    Invoke-Step "Building word count job" {
-        Push-Location (Join-Path $repoRoot "my-mapreduce-job")
-        try {
-            mvn -q package -DskipTests
-        } finally {
-            Pop-Location
-        }
+    Invoke-Step "Pulling submitter image from Docker Hub" {
+        docker compose --env-file $submitterEnvFile -p $submitterProjectName -f $submitterComposeFile pull
     }
 }
 
@@ -112,15 +106,11 @@ Invoke-Step "Checking Docker engine" {
 }
 
 Invoke-Step "Stopping any previous cluster" {
-    docker compose -f $composeFile down --remove-orphans
-}
-
-Invoke-Step "Building Docker image" {
-    docker compose -f $composeFile build
+    docker compose -f $clusterComposeFile down --remove-orphans
 }
 
 Invoke-Step "Starting master and workers" {
-    docker compose -f $composeFile up -d worker-a worker-b worker-c master
+    docker compose -f $clusterComposeFile up -d worker-a worker-b worker-c master
 }
 
 Invoke-Step "Waiting for master port" {
@@ -132,9 +122,14 @@ Invoke-Step "Opening dashboards" {
 }
 
 $submitterExitCode = 0
+$env:SUBMITTER_OUTPUT_DIR = (Resolve-Path $resultDirectory).Path
+$env:SUBMITTER_RESULT_FILE = $resultFileName
+$env:SUBMITTER_MASTER_HOST = "jmr-master"
+$env:SUBMITTER_MASTER_PORT = "50050"
+$env:SUBMITTER_CLIENT_ID = "submitter"
 try {
     Invoke-Step "Submitting the word count job" {
-        docker compose -f $composeFile up --no-deps --force-recreate submitter
+        docker compose --env-file $submitterEnvFile -p $submitterProjectName -f $submitterComposeFile up --abort-on-container-exit --exit-code-from submitter submitter
         if ($LASTEXITCODE -ne 0) {
             throw "Submitter exited with code $LASTEXITCODE."
         }
@@ -142,12 +137,22 @@ try {
 } catch {
     $submitterExitCode = 1
     Write-Host "==> Cluster logs after submitter failure"
-    docker compose -f $composeFile logs --tail 200 master worker-a worker-b worker-c submitter
+    docker compose -f $clusterComposeFile logs --tail 200 master worker-a worker-b worker-c
+    Write-Host "==> Submitter logs after submitter failure"
+    docker compose --env-file $submitterEnvFile -p $submitterProjectName -f $submitterComposeFile logs --tail 200 submitter-input-init submitter
     throw
 } finally {
+    Invoke-Step "Cleaning submitter resources" {
+        docker compose --env-file $submitterEnvFile -p $submitterProjectName -f $submitterComposeFile down -v --remove-orphans
+    }
+    Remove-Item Env:SUBMITTER_OUTPUT_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:SUBMITTER_RESULT_FILE -ErrorAction SilentlyContinue
+    Remove-Item Env:SUBMITTER_MASTER_HOST -ErrorAction SilentlyContinue
+    Remove-Item Env:SUBMITTER_MASTER_PORT -ErrorAction SilentlyContinue
+    Remove-Item Env:SUBMITTER_CLIENT_ID -ErrorAction SilentlyContinue
     if ($StopCluster) {
         Invoke-Step "Stopping cluster" {
-            docker compose -f $composeFile down --remove-orphans
+            docker compose -f $clusterComposeFile down --remove-orphans
         }
     }
 }
