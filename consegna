@@ -1,0 +1,6 @@
+Here are the deliverables:
+  - Main repository: https://github.com/leorm2002/jmr
+  - Reference implementation showing how to use the library to create a simple distributed Word Count job: https://github.com/leorm2002/jmr-wc
+  - Integration example using the public Docker images created for the project through a simple Docker Compose setup: https://github.com/leorm2002/jmr-integration
+  - Demo video of the execution of the Word Count job: [https://youtu.be/4rdVm8sqLqU]
+  - Final report: [attach distributed-systems-final-report.pdf]
