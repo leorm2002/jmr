@@ -311,8 +311,8 @@ The library shall provide users with abstractions for parallel computation witho
 
     \item \textbf{Reproducible Deployment}
           \begin{itemize}
-              \item The system shall be runnable both as ordinary Java processes and through Dockerized scripts used during validation.
-              \item \textit{Acceptance Criterion:} The same codebase can be exercised locally and in containers without changing its public programming model.
+              \item The system shall be runnable both as ordinary Java processes and through published Docker images.
+              \item \textit{Acceptance Criterion:} Master, worker, and demo job artifacts can be executed from released fat JARs or from public Docker images without changing the public programming model.
           \end{itemize}
 
     \item \textbf{Resource Cleanup}
@@ -363,8 +363,8 @@ The library shall provide users with abstractions for parallel computation witho
 
     \item \textbf{Docker Support}
           \begin{itemize}
-              \item The project shall provide Docker-based deployment paths for reproducible experiments.
-              \item \textit{Acceptance Criterion:} Master, worker, and demo jobs can be launched either with the supplied local scripts or with the separate Docker Compose integration repository.
+              \item The project shall provide Docker images for the master and worker runtime and shall interoperate with the public Docker images of the demo job.
+              \item \textit{Acceptance Criterion:} A user can start a complete cluster using the published images \texttt{leo02n/jmr-master}, \texttt{leo02n/jmr-worker}, and \texttt{leo02n/jmr-wc}.
           \end{itemize}
 \end{enumerate}
 
@@ -697,12 +697,12 @@ The runtime introduces five infrastructural families:
     \item one \textbf{HTTP dashboard} per master and per worker, used only for observability, no direct interaction.
 \end{itemize}
 
-The deployment topology presented as a reference use case is shown in \cref{fig:deployment-topology}. In the script-based Docker setup, the master and workers are individual containers attached to the same virtual network, while the submitter container joins that network for the duration of the job and starts the local data provider inside the submitter process.
+The deployment topology presented as a reference use case is shown in \cref{fig:deployment-topology}. In the packaged Docker setup, the master and workers are individual containers attached to the same virtual network, while the submitter container from the word-count example joins that network for the duration of the job and starts the local data provider inside the submitter process.
 
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.95\textwidth]{diagrams/deployment_topology.png}
-    \caption{Deployment topology used by the project scripts}
+    \caption{Deployment topology used by the packaged Docker demo}
     \label{fig:deployment-topology}
 \end{figure}
 
@@ -899,7 +899,7 @@ The master replicates uploaded JARs and serialized job files to all workers as s
 \end{itemize}
 
 \paragraph{Liveness detection.}
-The implementation contains a \texttt{Heartbeat} RPC in the protocol, but the deployed failure detector is actually \textbf{master-driven active health checking}. \texttt{WorkerMonitor} probes the gRPC health service every 5 seconds and removes a worker only after a ceirtain number (3 in the implmentation) of consecutive failures. In practice, a worker is therefore considered dead after about 15 seconds of unreachability. This design is simpler than a push-based heartbeat loop and reuses the standard gRPC health mechanism.
+The implementation contains a \texttt{Heartbeat} RPC in the protocol, but the deployed failure detector is actually \textbf{master-driven active health checking}. \texttt{WorkerMonitor} probes the gRPC health service every 5 seconds and removes a worker only after a fixed threshold of consecutive failures. In the current configuration, this threshold is 3, so a worker is considered dead after about 15 seconds of unreachability. This design is simpler than a push-based heartbeat loop and reuses the standard gRPC health mechanism.
 
 \paragraph{Retry policy.}
 Task re-execution follows a precise policy:
@@ -1028,7 +1028,7 @@ From an engineering perspective, three implementation details are worth highligh
 \section{Validation}\label{validation}
 
 \subsection{Automatic Testing}\label{automatic-testing}
-Validation is organized on three levels: Java unit tests for deterministic low-level behaviour, Python-driven integration tests for cluster scenarios, and manual acceptance checks for the dashboards and operator workflow.
+Validation is organized on three levels: Java unit tests for deterministic low-level behaviour, internal Python-driven integration tests for cluster scenarios, and manual acceptance checks for the dashboards and operator workflow.
 
 \paragraph{Unit tests.}
 The Maven modules include focused JUnit tests that exercise core building blocks:
@@ -1048,7 +1048,7 @@ mvn test
 \end{verbatim}
 
 \paragraph{Integration tests.}
-The repository also contains top-level Python integration tests that orchestrate a real Docker cluster. They are especially useful because many requirements concern interactions among components rather than isolated methods.
+The repository also contains top-level Python integration tests that orchestrate a real Docker cluster. These tests are internal development and validation tooling: they are useful because many requirements concern interactions among components rather than isolated methods, but they are not part of the public deployment path expected from end users.
 
 \begin{description}
     \item[\texttt{tests/test\_failing\_job.py}] Runs a deliberately failing job that throws either in the mapper or in the reducer. Rationale: verify that fatal user-code errors surface as job failures and are reflected in master logs. Run with \texttt{python tests/test\_failing\_job.py}. Requirements covered: job status reporting, error propagation, retry exhaustion.
@@ -1070,123 +1070,71 @@ Manual acceptance testing was performed on the operational workflow that is diff
 These checks were not fully automated because they involve user-facing dashboard readability, timing-dependent operator feedback, and subjective confirmation that the system is understandable and debuggable in practice, not only correct from an API perspective.
 
 \section{Deployment}\label{deployment}
-The project supports three practical deployment styles: a script-based Docker workflow in this repository, a direct Java/Maven workflow for local experimentation without containers, and a separate Docker Compose integration project used as a packaged demo.
+The public deployment story is intentionally limited to two paths: released fat JARs for users who want to run ordinary Java processes, and published Docker images for users who want a ready-made local cluster. The Python tests and convenience shell scripts used during development are internal validation tooling; they are intended neither to be run nor guaranteed to work with the delivered system.
 
 \paragraph{Prerequisites.}
 The main software prerequisites are:
 %
 \begin{itemize}
-    \item \textbf{Docker Engine or Docker Desktop} for the containerized workflow;
-    \item \textbf{JDK 21+} and \textbf{Maven} to build the modules locally in development mode;
-    \item \textbf{Git Bash} on Windows for the provided \texttt{.sh} scripts;
-    \item \textbf{PowerShell} if the Windows helper \texttt{run-docker-wordcount.ps1} is used;
-    \item \textbf{Python 3} only if the top-level integration tests are executed.
+    \item \textbf{JDK 21+} for the fat-JAR deployment;
+    \item \textbf{Maven} only if the artifacts are rebuilt from source rather than downloaded from the release pages.
+    \item \textbf{Docker Engine or Docker Desktop with Docker Compose} for the containerized demo;
 \end{itemize}
 
 \paragraph{Configuration.}
-No mandatory environment variables are required for the core runtime. Configuration is mostly command-line driven:
-%
-\begin{itemize}
-    \item cluster size, master base port, and container memory are parameters of \texttt{scripts/startCluster.sh};
-    \item input directory and result output path are parameters of \texttt{scripts/scriptExecuteWc.sh};
-    \item static worker definitions are passed directly to \texttt{StaticMasterLauncher};
-    \item service discovery is enabled implicitly when using the non-static launchers.
-\end{itemize}
+No mandatory environment variables are required by the core runtime. In the Java-process deployment, configuration is command-line based: each worker receives its id, port, and storage directory, while the master receives its port, storage directory, and optionally the static worker endpoints. In the Docker Compose deployment, the integration repository provides the compose files and a small \texttt{submitter.env} file for the demo job parameters such as input directory, output directory, result filename, and master endpoint.
 
-\paragraph{Recommended Docker deployment with published images.}
-From a clean checkout, the most direct workflow uses the published Docker images listed in the project README:
+\paragraph{Fat-JAR deployment.}
+The master and worker artifacts are published as runnable fat JARs. After downloading or building them, a minimal local cluster with automatic JmDNS discovery can be launched as follows:
 %
 \begin{verbatim}
-scripts/startCluster.sh 3 50050
-scripts/scriptExecuteWc.sh 50050
-\end{verbatim}
-
-Expected outcome:
-%
-\begin{itemize}
-    \item master gRPC endpoint on \texttt{localhost:50050};
-    \item master dashboard on \texttt{http://localhost:51050};
-    \item workers on \texttt{localhost:50051}, \texttt{50052}, \texttt{50053};
-    \item worker dashboards on \texttt{http://localhost:51051}, \texttt{51052}, \texttt{51053};
-    \item a CSV result file in \texttt{docker-output/}.
-\end{itemize}
-
-The cluster can then be stopped with:
-%
-\begin{verbatim}
-scripts/stopCluster.sh
-\end{verbatim}
-
-\paragraph{Local development Docker deployment.}
-The \texttt{--dev} mode builds local master, worker, and submitter images. The submitter image expects the word-count example repository to be available in this checkout as \texttt{my-mapreduce-job}; this corresponds to the external \texttt{jmr-wc} repository referenced by the README:
-%
-\begin{verbatim}
-git clone https://github.com/leorm2002/jmr-wc my-mapreduce-job
-scripts/startCluster.sh 3 50050 --dev
-scripts/scriptExecuteWc.sh 50050 --dev
-\end{verbatim}
-
-The failing-job submitter follows the same convention. For example:
-%
-\begin{verbatim}
-scripts/scriptExecuteFailingJob.sh 50050 map --dev
-\end{verbatim}
-
-\paragraph{Manual Java deployment from scratch.}
-The runtime can also be started without Docker after building the Maven modules and copying or referencing the generated fat JARs. A minimal local cluster with automatic JmDNS discovery can be launched as follows:
-%
-\begin{verbatim}
-cd mapreduce-parent
-mvn -q install -DskipTests
+java -Djava.net.preferIPv4Stack=true \
+  -jar jmr-worker.jar -p 10001 -w 1 -sd worker-data-1
 
 java -Djava.net.preferIPv4Stack=true \
-  -jar jmr-worker-fat.jar -p 10001 -w 1 -sd worker-data-1
+  -jar jmr-worker.jar -p 10002 -w 2 -sd worker-data-2
 
 java -Djava.net.preferIPv4Stack=true \
-  -jar jmr-worker-fat.jar -p 10002 -w 2 -sd worker-data-2
-
-java -Djava.net.preferIPv4Stack=true \
-  -jar jmr-master-fat.jar -p 10000 -sd master-data
+  -jar jmr-master.jar -p 10000 -sd master-data
 \end{verbatim}
 
 The master dashboard is then available on the master port plus 1000, for example \texttt{http://localhost:11000}. If service discovery is not desired, the same topology can be started with explicit worker endpoints:
 %
 \begin{verbatim}
 java -Djava.net.preferIPv4Stack=true \
-  -cp jmr-worker-fat.jar it.jmr.worker.StaticWorkerLauncher \
+  -cp jmr-worker.jar it.jmr.worker.StaticWorkerLauncher \
   -p 10001 -w 1 -sd worker-data-1
 
 java -Djava.net.preferIPv4Stack=true \
-  -cp jmr-worker-fat.jar it.jmr.worker.StaticWorkerLauncher \
+  -cp jmr-worker.jar it.jmr.worker.StaticWorkerLauncher \
   -p 10002 -w 2 -sd worker-data-2
 
 java -Djava.net.preferIPv4Stack=true \
-  -cp jmr-master-fat.jar it.jmr.master.StaticMasterLauncher \
+  -cp jmr-master.jar it.jmr.master.StaticMasterLauncher \
   -p 10000 -sd master-data \
   --worker 1:127.0.0.1:10001 \
   --worker 2:127.0.0.1:10002
 \end{verbatim}
 
-Expected outcome: the master listens on \texttt{localhost:10000}, the workers listen on \texttt{localhost:10001} and \texttt{localhost:10002}, and the corresponding dashboards are exposed on ports \texttt{11000}, \texttt{11001}, and \texttt{11002}.
-
-\paragraph{Compose-based packaged demo.}
-The fixed three-worker Compose deployment is maintained in the separate integration repository referenced by the README, \url{https://github.com/leorm2002/jmr-integration}. This path is useful for a fully packaged demo because the compose files wire together:
+\paragraph{Docker Compose deployment with public images.}
+The packaged Docker demo is maintained in the separate integration repository \url{https://github.com/leorm2002/jmr-integration}. It consumes the public images \texttt{leo02n/jmr-master}, \texttt{leo02n/jmr-worker}, and \texttt{leo02n/jmr-wc}; no local image build is required. A complete run is:
 %
-\begin{itemize}
-    \item one master container with explicit worker definitions;
-    \item three worker containers with persistent named volumes;
-    \item one submitter container that runs the word-count example.
-\end{itemize}
-The compose files also set
+\begin{verbatim}
+git clone https://github.com/leorm2002/jmr-integration
+cd jmr-integration
+docker compose -f docker-compose.yml up -d
+docker compose --env-file submitter.env -p submit-wc \
+  -f docker-compose.submitter.yml up \
+  --abort-on-container-exit --exit-code-from submitter submitter
+docker compose --env-file submitter.env -p submit-wc \
+  -f docker-compose.submitter.yml down -v --remove-orphans
+docker compose -f docker-compose.yml down -v --remove-orphans
+\end{verbatim}
+
+Expected outcome: the master is reachable on \texttt{localhost:50050}, the master dashboard is reachable on \texttt{http://localhost:51050}, worker dashboards are exposed on ports \texttt{51051}--\texttt{51053}, and the word-count result is written to the output path configured by \texttt{submitter.env}.
+
 \paragraph{How containerization was engineered.}
-Containerization follows role-specific images rather than a single multi-purpose image:
-%
-\begin{itemize}
-    \item \texttt{docker/jmr-master/Dockerfile} packages the master and starts \texttt{StaticMasterLauncher};
-    \item \texttt{docker/jmr-worker/Dockerfile} packages the worker and starts \texttt{StaticWorkerLauncher};
-\end{itemize}
-
-This separation keeps runtime responsibilities clear and avoids shipping unnecessary binaries to every role.
+Containerization follows role-specific images rather than a single multi-purpose image. The main repository builds and publishes the master and worker runtime images through dedicated GitHub Actions workflows. The separate word-count repository builds and publishes the demo submitter images. The integration repository then composes these public images into a fixed three-worker deployment with persistent named volumes and explicit worker definitions. This separation keeps runtime, example job, and deployment concerns independent.
 
 \section{User Guide}\label{user-guide}
 
@@ -1217,20 +1165,18 @@ byte[] result = client.getJobResult();
 The concrete word-count example used in the project is implemented in \texttt{com.example.MyWcJob}.
 
 \paragraph{Running the distributed demo.}
-For the script-based demo with published images:
+For the packaged demo with published Docker images:
 %
 \begin{enumerate}
-    \item start the cluster with \texttt{scripts/startCluster.sh 3 50050};
-    \item submit the word-count job with \texttt{scripts/scriptExecuteWc.sh 50050};
+    \item clone the integration repository \url{https://github.com/leorm2002/jmr-integration};
+    \item start the cluster with \texttt{docker compose -f docker-compose.yml up -d};
+    \item submit the word-count job with the \texttt{docker compose} command documented in the integration repository;
     \item inspect the master dashboard on \texttt{http://localhost:51050};
     \item inspect worker dashboards on \texttt{http://localhost:51051} and following ports;
-    \item stop the cluster with \texttt{scripts/stopCluster.sh}.
+    \item stop the cluster with \texttt{docker compose -f docker-compose.yml down -v --remove-orphans}.
 \end{enumerate}
 
-Expected outcome: the job progresses through MAP and REDUCE, produces a CSV output under \texttt{docker-output/}, and leaves an event trail visible in both master and worker dashboards.
-
-For local image builds, clone \url{https://github.com/leorm2002/jmr-wc} into this checkout as \texttt{my-mapreduce-job} and add \texttt{--dev} to both script calls.
-
+Expected outcome: the job progresses through MAP and REDUCE, produces a CSV output in the output directory configured by \texttt{submitter.env}, and leaves an event trail visible in both master and worker dashboards.
 
 The dashboards summarized in \cref{fig:user-surfaces} serve as the main visual feedback during execution.
 
@@ -1238,11 +1184,10 @@ The dashboards summarized in \cref{fig:user-surfaces} serve as the main visual f
 \subsection*{Leonardo Naddei}
 
 \paragraph{Strengths of the product.}
-The strongest aspect of the project is architectural coherence. The resulting library is small enough to understand, but still demonstrates the main concerns of a distributed batch system: job submission, code distribution, remote execution, shuffle, observability, and recovery after worker loss. Another strong point is the operational tooling: dashboards and scripts make the system easier to inspect and demonstrate.
+The strongest aspect of the project is architectural coherence. The resulting library is small enough to understand, but still demonstrates the main concerns of a distributed batch system: job submission, code distribution, remote execution, shuffle, observability, and recovery after worker loss. Another strong point is the operational tooling: dashboards, released fat JARs, and published Docker images make the system easier to inspect and demonstrate.
 
 \paragraph{Weaknesses of the product.}
-The main weaknesses come from the intentionally reduced scope. The master is a single point of failure, security is minimal, scheduling is simple, and there is no support for restarting a failed cluster. The implementation is therefore convincing as a didactic distributed system, but not yet production-grade.
-The out-of-scope parts of the programs are also weak, while fully working the implmentation of the loading of the client program is extremely basic and does not implement any task-level neither closure-level deserialization isolation.
+The main weaknesses come from the intentionally reduced scope. The master is a single point of failure, security is minimal, scheduling is simple, and there is no support for restarting a failed cluster. User-provided code is trusted and loaded without sandboxing, so stronger isolation would be required in a production-grade evolution.
 
 \section{Future works}\label{future-works}
 The most important future work items are the following:
